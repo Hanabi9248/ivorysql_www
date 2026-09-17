@@ -14,22 +14,32 @@ export type HistoricalVersion = {
 
 export const CURRENT_VERSIONS: CurrentVersion[] = [
   {
-    date: "Jun 17, 2026",
-    version: "IvorySQL 5.4 STABLE",
-    url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.4/1.html",
-    pg: "PostgreSQL 18",
+    date: "Sep 17, 2026",
+    version: "IvorySQL 5.6 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.6/1.html",
+    pg: "PostgreSQL 18.6",
     highlight: true,
   },
   {
-    date: "Apr 21, 2026",
-    version: "IvorySQL 1.22 STABLE",
-    url: "https://docs.ivorysql.org/en/ivorysql-doc/v1.22/v1.22/1.html",
+    date: "Jul 27, 2026",
+    version: "IvorySQL 1.23 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v1.23/v1.23/1.html",
     pg: "PostgreSQL 14",
     highlight: false,
   },
 ];
 
 export const HISTORICAL_VERSIONS: HistoricalVersion[] = [
+  {
+    date: "Jun 17, 2026",
+    version: "IvorySQL 5.4 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.4/v5.4/1.html",
+  },
+  {
+    date: "Apr 21, 2026",
+    version: "IvorySQL 1.22 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v1.22/v1.22/1.html",
+  },
   {
     date: "Mar 12, 2026",
     version: "IvorySQL 5.3 STABLE",
