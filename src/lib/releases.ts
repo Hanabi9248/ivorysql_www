@@ -14,10 +14,10 @@ export type HistoricalVersion = {
 
 export const CURRENT_VERSIONS: CurrentVersion[] = [
   {
-    date: "Jun 17, 2026",
-    version: "IvorySQL 5.4 STABLE",
-    url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.4/1.html",
-    pg: "PostgreSQL 18",
+    date: "Sep 17, 2026",
+    version: "IvorySQL 5.6 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.6/1.html",
+    pg: "PostgreSQL 18.6",
     highlight: true,
   },
   {
@@ -30,6 +30,11 @@ export const CURRENT_VERSIONS: CurrentVersion[] = [
 ];
 
 export const HISTORICAL_VERSIONS: HistoricalVersion[] = [
+  {
+    date: "Jun 17, 2026",
+    version: "IvorySQL 5.4 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.4/v5.4/1.html",
+  },
   {
     date: "Apr 21, 2026",
     version: "IvorySQL 1.22 STABLE",

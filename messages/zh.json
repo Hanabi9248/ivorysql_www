@@ -486,13 +486,13 @@
       },
       {
         "quarter": "第三季度",
-        "version": "v5.5",
-        "kernel": "PG 内核 18.5"
+        "version": "v5.6",
+        "kernel": "PG 内核 18.6"
       },
       {
         "quarter": "第四季度",
-        "version": "v5.6",
-        "kernel": "PG 内核 18.6"
+        "version": "v5.7",
+        "kernel": "PG 内核 18.7"
       }
     ],
     "releaseLabel": "发布 {version}",

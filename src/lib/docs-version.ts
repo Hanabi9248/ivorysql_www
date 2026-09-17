@@ -5,7 +5,7 @@
  * Does NOT affect src/lib/releases.ts, which is a historical archive and
  * intentionally pins each entry to its own released version.
  */
-export const CURRENT_DOC_VERSION = "5.4";
+export const CURRENT_DOC_VERSION = "5.6";
 
 export function docUrl(locale: "cn" | "en", path: string): string {
   return `https://docs.ivorysql.org/${locale}/ivorysql-doc/v${CURRENT_DOC_VERSION}/${path}`;

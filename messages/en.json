@@ -486,13 +486,13 @@
       },
       {
         "quarter": "3rd Quarter",
-        "version": "v5.5",
-        "kernel": "PG Kernel 18.5"
+        "version": "v5.6",
+        "kernel": "PG Kernel 18.6"
       },
       {
         "quarter": "4th Quarter",
-        "version": "v5.6",
-        "kernel": "PG Kernel 18.6"
+        "version": "v5.7",
+        "kernel": "PG Kernel 18.7"
       }
     ],
     "releaseLabel": "Release {version}",
