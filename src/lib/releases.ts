@@ -21,15 +21,20 @@ export const CURRENT_VERSIONS: CurrentVersion[] = [
     highlight: true,
   },
   {
-    date: "Apr 21, 2026",
-    version: "IvorySQL 1.22 STABLE",
-    url: "https://docs.ivorysql.org/en/ivorysql-doc/v1.22/v1.22/1.html",
+    date: "Jul 27, 2026",
+    version: "IvorySQL 1.23 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v1.23/v1.23/1.html",
     pg: "PostgreSQL 14",
     highlight: false,
   },
 ];
 
 export const HISTORICAL_VERSIONS: HistoricalVersion[] = [
+  {
+    date: "Apr 21, 2026",
+    version: "IvorySQL 1.22 STABLE",
+    url: "https://docs.ivorysql.org/en/ivorysql-doc/v1.22/v1.22/1.html",
+  },
   {
     date: "Mar 12, 2026",
     version: "IvorySQL 5.3 STABLE",
