@@ -14,7 +14,7 @@ export type HistoricalVersion = {
 
 export const CURRENT_VERSIONS: CurrentVersion[] = [
   {
-    date: "Sep 17, 2026",
+    date: "Sep 18, 2026",
     version: "IvorySQL 5.6 STABLE",
     url: "https://docs.ivorysql.org/en/ivorysql-doc/v5.6/1.html",
     pg: "PostgreSQL 18.6",
