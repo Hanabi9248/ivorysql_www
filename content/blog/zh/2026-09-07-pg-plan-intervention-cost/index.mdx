@@ -9,6 +9,8 @@ description: "1%的模糊代价比较为何会让LIMIT更慢、HINT失灵，PG 1
 ---
 
 
+[观看回放](https://www.bilibili.com/video/BV1iwLu6oEE5/)
+
 ## 前言
 
 在数据库系统的日常运维中，SQL执行计划“跑偏”是最令DBA头疼的问题之一。明明一条SQL语句，不加LIMIT时执行飞快，加了LIMIT反而慢了几千倍；明明通过HINT指定了索引，优化器却置若罔闻，走了顺序扫描。这些看似“降智”的行为背后，究竟隐藏着怎样的机制？

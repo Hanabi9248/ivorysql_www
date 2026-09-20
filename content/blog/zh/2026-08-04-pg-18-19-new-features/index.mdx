@@ -10,6 +10,8 @@ description: "深度解读 PostgreSQL 18 与 19 的新特性，从 IO 预取、U
 > 本文整理于 HOW 2026 演讲内容，演讲者：德哥，PostgreSQL ACED、IvorySQL 专家顾问委员，公众号“digoal 德哥”主理人。
 
 
+[观看回放](https://www.bilibili.com/video/BV15NLu6REnX/)
+
 ## 一、如何高效“挖掘”新特性？
 
 演讲者分享了一个有趣的实践：面对 PG 18 已发布的 Release Notes，他利用 AI 工具（如 Copilot）对数千条 commit 日志进行自动分析，先让模型总结出三十余条潜在特性，再逐条要求生成详细解释和代码校验，最终筛选出对用户体感最强的若干项。对于尚未正式发版的 PG 19，则通过拉取过去一年内（从 PG 18 Beta1 时间点至今）的所有 commit，同样交由 AI 分析提炼。经过人工复核，准确度令人满意。这一方法也为社区爱好者提供了高效跟踪新版本的思路。

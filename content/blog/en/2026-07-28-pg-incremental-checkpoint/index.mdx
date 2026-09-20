@@ -10,6 +10,8 @@ description: "Incremental checkpoints in PostgreSQL's shared-storage cluster fac
 
 > This article is based on Lyu Haibo's (Chief Researcher at 易景科技 (Yijing Technology), PG ACE Director, Enterprise Mentor at Peking University) presentation at HOW 2026.
 
+[Watch the replay](https://www.bilibili.com/video/BV1EjLM6bEnD/)
+
 ## 1. Why Incremental Checkpoints Were Introduced
 
 While developing a shared-storage cluster architecture based on PostgreSQL (similar to Oracle RAC), a real-world problem surfaced: when PG's original full checkpoint mechanism was used unchanged, dirty pages kept accumulating across the nodes, so performance under stress testing could never improve. To solve this problem, we introduced incremental checkpoints.
