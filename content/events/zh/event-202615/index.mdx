@@ -1,58 +1,86 @@
 ---
-title: "活动预告｜PostgreSQL & IvorySQL 技术交流 Meetup 杭州站"
+title: "活动回顾｜PostgreSQL & IvorySQL 技术交流 Meetup 杭州站圆满举办"
 date: '2026-09-12'
 location: "杭州市西湖区云谷福地中心南楼 4 楼阶梯会议室"
 eventType: "Meetup"
 type: Offline
-image: /images/events/event-202615.png
+image: /images/events/event-202615-photo.jpg
 description: >-
-  德哥、唐成、付超、Nickyoung、吴建波、马顺华齐聚杭州，围绕数据库内核、高可用架构、内存排障与 AI 工程化展开实战交流。
+  9 月 12 日，PostgreSQL & IvorySQL 技术交流 Meetup 杭州站圆满举办，六场分享覆盖内核架构、版本演进、高可用、内存故障、企业级 RAG 与 AI Sandbox。
 slug: "event-202615"
 ---
 
-PostgreSQL 正在经历一场深刻的演进：内核层面，PostgreSQL 19 持续引入新特性；生态层面，IvorySQL 以双 Parser 架构在 PG 之上构建 Oracle 兼容层；应用层面，向量能力让 PG 成为企业级 RAG 的优选底座。如何理解这些变化，并将其转化为可落地的生产力？
+9 月 12 日，PostgreSQL & IvorySQL 技术交流 Meetup 杭州站 在杭州云谷福地中心南楼 4 楼阶梯会议室圆满举办。数十位来自杭州及周边地区的 DBA、开发者、架构师与 AI 应用工程师齐聚一堂，围绕 PostgreSQL 内核、高可用架构、内存管理、Oracle 兼容迁移与企业级 AI 落地，展开了一场从代码到实战的深度交流。
 
-9 月 12 日，**PostgreSQL & IvorySQL 技术交流 Meetup 杭州站**将在杭州云谷福地中心正式举办。我们将从**数据库内核、高可用架构、AI 工程化**三个维度展开，邀请 PostgreSQL ACED、资深数据库架构师、PG ACE 等嘉宾带来代码级、实战级的技术交流。
+从下午两点到傍晚，六场主题分享依次展开，内容覆盖内核代码、版本演进、生产运维、AI 工程化等多个层次，全程高能。
 
-## 活动信息
+![合照](/images/events/event-202615-photo.jpg)
 
-- **活动时间**：2026 年 9 月 12 日（周六）14:00–17:10
-- **活动地点**：杭州西湖区云谷福地中心南楼 4 楼阶梯会议室
-- **活动主题**：PostgreSQL & IvorySQL 技术交流 Meetup · 杭州站
-- **主办单位**：IvorySQL 社区
+## 演讲回顾
 
-## 谁适合参加？
+### 德哥：IvorySQL 双 Parser 架构——从代码视角看 PostgreSQL 之上的 Oracle 兼容层
 
-- **DBA / 运维工程师**：获取高可用方案选型、内存故障排查等生产环境实战经验
-- **应用开发者 / 架构师**：了解 IvorySQL 双 Parser 架构、Oracle 兼容层实现原理与版本新特性
-- **AI 应用工程师**：理解 PostgreSQL 为何适合作为企业级 RAG 数据底座，以及如何搭建 AI Sandbox
-- **技术决策者 / 信息化负责人**：评估 PG 与 IvorySQL 在 Oracle 迁移及 AI 就绪场景下的选型价值
-- **开源社区爱好者**：近距离接触社区核心贡献者，参与杭州本地 PG 技术交流
+![德哥](/images/events/event-202615-digoal.png)
 
-## 活动亮点
+德哥（PostgreSQL ACED、IvorySQL 专家顾问委员）从代码层面拆解了 IvorySQL 的架构设计。整个 Oracle 兼容能力浓缩为一个函数指针 `sql_raw_parser`——默认指向原生 PG 解析器，Oracle 模式下切换到 `ora_raw_parser`，通过 GUC 的 `assign_hook` 触发切换。最关键的洞察是：解析后所有 AST 节点都是 PG 原生类型，优化器和执行器完全走 PG 原生路径。“解析层分离、执行层统一”的设计，让 IvorySQL 得以在 40 天内跟进 PG 主版本。
 
-1. **从内核代码到生产实战**：覆盖双 Parser 架构、版本演进、内存故障定位和高可用方案选型，从代码原理延伸到生产运维
-2. **AI 不止是话题，更是落地路径**：讨论企业级 RAG 底座选型和 AI Sandbox 实验环境，聚焦可复用的工程实践
-3. **多维度专家阵容**：PostgreSQL ACED、技术著作作者、Oracle 与 PostgreSQL 双 ACE 专家、PG ACE 齐聚杭州
-4. **小而精的深度交流**：50–100 人精品规模，每个演讲开放现场提问，让参会者与嘉宾进行面对面交流
+演讲视频：https://www.bilibili.com/video/BV1TYYi6AEas/
 
-## 嘉宾阵容
+### 唐成：IvorySQL 5.4 和 PostgreSQL 19 新特性解读
 
-- **德哥（digoal）** — PostgreSQL ACED，IvorySQL 专家顾问委员，PostgreSQL 中国社区发起人之一
-- **唐成** — 《PostgreSQL 修炼之道：从小工到专家》作者，中启乘数科技创始人，资深数据库架构师
-- **付超** — Oracle ACE 与 PostgreSQL ACE 双认证专家，PG 分会西安用户组核心成员
-- **Nickyoung** — PostgreSQL ACE，PG 分会西安用户组负责人，公众号「PostgreSQL 运维之道」主理人
-- **吴建波** — 浙江瀛云科技有限公司技术专家
-- **马顺华** — 「shunwah 星辰数智社」主理人，拥有多项数据库认证
+![唐成](/images/events/event-202615-tangcheng.png)
 
-## 互动与奖励
+唐成（《PostgreSQL 修炼之道：从小工到专家》作者，中启乘数科技创始人）系统解读了两个版本的最新动态。IvorySQL 5.4 于 2026 年 6 月发布，基线为 PostgreSQL 18.4，在 Oracle 兼容层延续 5.3 体系的基础上，重点增强了 ROWID、SYS_GUID、Oracle 风格 INSTR() 等系统函数及 PL/iSQL 能力，并新增 pgvector、pg_ai_query、AGE 等扩展生态。PostgreSQL 19 方面，他重点解析了图数据库基本功能、原生 REPACK（合并 VACUUM FULL + CLUSTER 并支持在线重组）、AIO worker 弹性扩缩、autovacuum 打分系统等关键特性。
 
-- 每个演讲环节结束后开放 2 个现场提问
-- 成功提问者将获得社区周边礼品
-- 到场即送伴手礼，席位有限，请尽早报名
+回放视频：https://www.bilibili.com/video/BV1tSYv6aEip/
 
-## 扫码报名
+### 付超：PostgreSQL 高可用——生产环境怎么选？
 
-扫描海报中的二维码报名。9 月 12 日，杭州相聚，聊内核、聊高可用、聊 AI 落地，共筑杭州地区开源数据库技术交流圈。
+![付超](/images/events/event-202615-fuchao.png)
 
-![PostgreSQL 与 IvorySQL 技术交流 Meetup 杭州站报名海报](/images/events/event-202615-poster.jpg)
+付超（Oracle ACE 与 PostgreSQL ACE 双认证专家）从选型决策到故障落地，给出了一份可以直接照着用的技术栈全景。他先梳理了 WAL 与流复制的地基——五档同步级别如何决定 RPO、复制槽如何决定磁盘水位。然后对比了三种主流 HA 方案：Patroni（事实标准，etcd 仲裁防脑裂）、repmgr（轻量老牌，适合中小环境）、pg_auto_failover（极简自动，无需外部依赖）。最后他分享了一个真实的 pg_auto_failover WAL 分叉故障复盘，核心原则是“先确认哪边数据有效，宁可慢，不可错”。
+
+回放视频：https://www.bilibili.com/video/BV1ZnYk6eEZ3/
+
+### Nickyoung：PostgreSQL 内存管理与内存故障实战
+
+![Nickyoung](/images/events/event-202615-nickyoung.png)
+
+Nickyoung（PostgreSQL ACE，PG 分会西安用户组负责人）带来了一场从原理到案例再到诊断方法论的完整分享。他拆解了 MemoryContext 体系与四种分配器的适用场景，复盘了两个真实故障：一条 DELETE 在 2 万子分区表上 60 秒吃满 120GB 内存（PG13 及更早版本的 O(N²) 规划器问题），以及 idle 进程因裸 malloc 配合 `ereport(ERROR)` 异常路径导致的内存泄露。最后给出了从进程级指标到源码级追踪的四层诊断方法论。
+
+回放视频：https://www.bilibili.com/video/BV1FiYr6iEjQ/
+
+### 吴建波：为什么 PG 比“纯向量数据库”更适合企业级 RAG
+
+![吴建波](/images/events/event-202615-wujianbo.png)
+
+吴建波（浙江瀛云科技有限公司技术专家）从架构决策角度给出了一个务实的技术选型视角。核心论点是：PG 的价值不在“跑得更快”，而在工程复杂度的降维打击——业务数据与向量同表同事务消灭双库同步、RLS 行级安全在数据库层强制权限控制、原生混合检索一条 SQL 完成过滤 + BM25 + 向量语义加权融合。他也坦诚地给出了性能边界：百万到五千万向量规模 PG 完全胜任，十亿级以上需评估分布式专用方案。
+
+回放视频：https://www.bilibili.com/video/BV1GSYr6dEfA/
+
+### 马顺华：PostgreSQL × AI——从技术探索到 Sandbox 实验
+
+![马顺华](/images/events/event-202615-mashunhua.png)
+
+马顺华（“shunwah 星辰数智社”主理人）介绍了 PGNexus——一个 PostgreSQL 全栈式产学研协同创新平台。平台三大支柱为内容聚合（AI 汇总博客、邮件列表、技术新闻并支持日刊/周刊订阅）、沙盒实验（浏览器里的 PostgreSQL 实验室，基础沙盒秒级启动，开发者沙盒支持补丁管理与 AI 自动补丁测试）、社区连接（贡献者档案与机构招聘）。目前平台已支持 PostgreSQL 14–18、IvorySQL 1/4/5、HGDB v9。并在现场做了实操演示。
+
+> PGNexus 官方网站：https://pgnexus.ai/
+> **免费体验，欢迎注册！**
+
+回放视频：https://www.bilibili.com/video/BV1YgYr6pEGj/
+
+## PPT 下载
+
+关注公众号【IvorySQL开源数据库社区】，回复关键词【20260912】获取 PPT 下载链接。
+
+## 致谢
+
+本次活动延续了 Meetup 一贯的高互动调性。每个演讲环节结束后开放现场提问，不少参会者抓住机会与嘉宾深入探讨。
+
+感谢每一位到场的技术人，感谢德哥、唐成、付超、Nickyoung、吴建波、马顺华的精彩分享，感谢各个合作伙伴的支持，也感谢所有在幕后付出的工作人员与志愿者。
+
+## 下一站，见
+
+杭州站落幕，但 PostgreSQL & IvorySQL 的技术交流不会停。后续活动正在筹备中，欢迎关注 IvorySQL 社区公众号，第一时间获取活动信息。
+
+技术不止，交流不息。下一站，见。

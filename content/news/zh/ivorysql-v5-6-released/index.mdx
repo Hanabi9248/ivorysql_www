@@ -1,0 +1,197 @@
+---
+title: "IvorySQL 5.6 发布：PG 18.6 内核升级，沙盒即开即用"
+date: "2026-09-18"
+category: "product"
+categoryLabel: "产品"
+description: "基于 PostgreSQL 18.6 内核，IvorySQL 5.6 新增 AI 辅助贡献指南、适配 PGNexus 在线沙盒，并带来 Oracle 兼容性、内存安全与客户端接口的多项修复。"
+image: "/images/news/ivorysql-v5-6-zh.png"
+slug: "ivorysql-v5-6-released"
+---
+
+<p>
+  2026 年 9 月 18 日，IvorySQL 社区正式发布 IvorySQL 5.6。
+</p>
+
+<p>
+  作为兼容 Oracle 的开源 PostgreSQL 数据库，IvorySQL 5.6 将 PostgreSQL 内核升级至 18.6，并围绕 Oracle 兼容性、内存安全、客户端接口以及扩展构建等方面进行了多项修复与改进。同时，IvorySQL 5.6 新增 AI 辅助贡献指南，完成多项问题修复，并持续完善在线体验、云原生部署以及扩展生态支持。
+</p>
+
+<p>
+  本次发布同步适配 PGNexus 沙盒：无需本地安装，用户即可在线一键构建 IvorySQL 5.6 实验环境，支持补丁应用与测试验证，覆盖单机、流复制、逻辑复制及高可用集群等多种拓扑架构，为零门槛探索新版本、开展 AI 辅助实验与社区协作提供便捷入口。
+</p>
+<h2 id="section-1">PostgreSQL 18.6 内核更新</h2>
+<p>
+  IvorySQL 5.6 同步升级至 PostgreSQL 18.6。
+</p>
+
+<p>
+  值得注意的是，PostgreSQL 18.5 在发布准备阶段发现了一个回归问题，因此并未正式发布。IvorySQL 5.6 直接基于 PostgreSQL 18.6 进行内核升级。
+</p>
+
+<p>
+  PostgreSQL 18.6 主要包含以下更新：
+</p>
+<ol>
+  <li>新增服务器参数 <code>output_plugin_libraries</code>，限制逻辑解码输出插件只能使用指定的插件集合；</li>
+  <li>修复 contrib/pgcrypto 中 PGP 加密对不支持密码算法的检测问题；</li>
+  <li>修复 psql 执行脚本化 <code>COPY ... FROM STDIN</code> 命令时的数据处理问题，即使 <code>COPY</code> 在发送 <code>PGRES_COPY_IN</code> 之前失败，也能够正确跳过后续内联数据；</li>
+  <li>在此前未进行检查的场景中增加对数据类型 <code>USAGE</code> 权限的检查；</li>
+  <li>在角色发生变更后，使依赖角色的缓存执行计划失效；</li>
+  <li>确保并行 GIN 索引构建能够正确更新表的 <code>pg_class.reltuples</code> 值。</li>
+</ol>
+<p>
+  更多详情可参考 <a href="https://www.postgresql.org/docs/release/18.6/" target="_blank" rel="noopener noreferrer">PostgreSQL 18.6 官方发布说明</a>：
+</p>
+
+<p>
+  <strong><a href="https://www.postgresql.org/docs/release/18.6/" target="_blank" rel="noopener noreferrer">https://www.postgresql.org/docs/release/18.6/</a></strong>
+</p>
+<h2 id="section-2">IvorySQL 5.6 关键特性</h2>
+<h3 id="section-3">升级至 PostgreSQL 18.6 内核</h3>
+<p>
+  IvorySQL 内核升级至 PostgreSQL 18.6，在保持数据库能力持续演进的同时，同步获得 PostgreSQL 上游版本的相关修复与更新。
+</p>
+<h3 id="section-4">IvorySQL 5.6 沙盒</h3>
+<p>
+  PGNexus 全新适配 IvorySQL 5.6，开启零门槛云端AI辅助实验新体验！
+</p>
+
+<p>
+  PGNexus 作为面向全场景的一站式知识与实验平台，现已同步支持最新 IvorySQL 5.6。无需本地安装，通过在线沙盒即可一键构建环境。支持补丁应用与测试验证，覆盖单机、流复制、逻辑复制及高可用集群等多种拓扑架构，开箱即用，助力高校、企业及开发者高效协作，极速探索新版本特性。
+</p>
+<ul>
+  <li>了解 <a href="https://pgnexus.ai" target="_blank" rel="noopener noreferrer">PGNexus</a>：<strong><a href="https://pgnexus.ai" target="_blank" rel="noopener noreferrer">https://pgnexus.ai</a></strong></li>
+  <li>立即体验 <a href="https://pgnexus.ai/sandboxes" target="_blank" rel="noopener noreferrer">IvorySQL 5.6 沙盒</a>：<strong><a href="https://pgnexus.ai/sandboxes" target="_blank" rel="noopener noreferrer">https://pgnexus.ai/sandboxes</a></strong></li>
+</ul>
+<h3 id="section-5">在线体验 IvorySQL 5.6</h3>
+<p>
+  IvorySQL 5.6 提供基于浏览器的在线交互环境。用户无需安装数据库，即可在线体验 IvorySQL 5.6，并实时探索和评估相关功能。
+</p>
+
+<p>
+  <a href="http://trial.ivorysql.org/" target="_blank" rel="noopener noreferrer">在线体验地址</a>：<strong><a href="http://trial.ivorysql.org/" target="_blank" rel="noopener noreferrer">http://trial.ivorysql.org/</a></strong>
+</p>
+<h3 id="section-6">AI 辅助贡献指南</h3>
+<p>
+  随着 AI 工具逐渐应用于软件开发和开源协作，IvorySQL 5.6 建立 AI 辅助贡献相关指南。指南覆盖许可证合规、人工审核与签署责任、AI 工具使用说明、AI 生成代码比例披露，以及代码评审中的责任参与等内容，为 AI 辅助参与 IvorySQL 社区贡献提供相应规范。
+</p>
+<h3 id="section-7">全平台发行支持</h3>
+<p>
+  IvorySQL 5.6 提供覆盖 X86、ARM、MIPS 和 LoongArch 等架构的多平台安装介质，满足不同硬件平台下的部署需求。
+</p>
+<h3 id="section-8">云原生容器化部署</h3>
+<p>
+  IvorySQL 5.6 支持通过 Docker Compose、Podman、Swarm、Helm 以及 IvorySQL 5.6 Operator 快速部署单机或高可用数据库集群。通过多种容器化部署方式，为不同应用环境下的 IvorySQL 部署提供支持。
+</p>
+<h3 id="section-9">IvorySQL Cloud 5.6 发布</h3>
+<p>
+  IvorySQL Cloud 5.6 是面向数据库全生命周期管理的可视化平台，提供 IvorySQL 5.6 数据库订阅管理、端到端生命周期运维编排以及周边生态服务集成能力。
+</p>
+<h3 id="section-10">扩展与工具</h3>
+<p>
+  IvorySQL 5.6 目前共支持 34 项扩展与工具，覆盖 AI、向量检索、全文检索、地理信息、数据库运维、分区表管理、数据集成等多个场景，包括：
+</p>
+<ul>
+  <li>AI 与向量： pg_ai_query、pgvector</li>
+  <li>图数据库： AGE</li>
+  <li>全文检索与中文分词： pg_bigm、pg_jieba、PGroonga、pg_textsearch、zhparser</li>
+  <li>地理信息与路网： PostGIS、pgRouting</li>
+  <li>数据库运维与监控： pg_profile、pg_readonly、pg_repack、pg_show_plans、pg_stat_monitor、system_stats、pgnodemx</li>
+  <li>分区表管理： pg_partman</li>
+  <li>调度与任务管理： pg_cron、pgagent</li>
+  <li>数据加载与备份： pg_bulkload、pgBackRest</li>
+  <li>SQL 与数据库工具： ddlx、pg_hint_plan、plpgsql_check</li>
+  <li>临时表： pgtt</li>
+  <li>审计与权限： pgaudit、set_user</li>
+  <li>连接池与数据库代理： pgBouncer、PgDog</li>
+  <li>网络访问： pg_curl、pgsql-http</li>
+  <li>异构数据集成： redis_fdw</li>
+  <li>WAL 日志解码： wal2json</li>
+</ul>
+<h2 id="section-11">IvorySQL 5.6 问题修复</h2>
+<p>
+  IvorySQL 5.6 针对 Oracle 兼容性、参数配置、内存安全、客户端接口以及扩展构建等方面进行了多项问题修复。
+</p>
+<ul>
+  <li>修复 Oracle 兼容的 interval 乘法和除法运算中可能出现的溢出及 NaN 处理问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1211" target="_blank" rel="noopener noreferrer">#1211</a></li>
+  <li>禁止通过 ALTER USER/ROLE/DATABASE SET 持久化设置 ivorysql.compatible_mode，并修复 SET ... TO DEFAULT 和特定参数 RESET 可能绕过限制的问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1372" target="_blank" rel="noopener noreferrer">#1372</a></li>
+  <li>修复表达式计算过程中，Package 限定的变量引用可能解析为无关本地变量的问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1381" target="_blank" rel="noopener noreferrer">#1381</a></li>
+  <li>修复使用 GCC 14 及更高版本进行构建时出现的构建失败问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1385" target="_blank" rel="noopener noreferrer">#1385</a></li>
+  <li>修复序列中冲突或重复 SHARD 选项的校验问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1401" target="_blank" rel="noopener noreferrer">#1401</a></li>
+  <li>修复第三方 PostgreSQL 扩展针对 IvorySQL 进行构建时出现的构建失败问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1448" target="_blank" rel="noopener noreferrer">#1448</a></li>
+  <li>使 ivorysql.enable_case_switch 在 SHOW ALL 中可见，并支持通过配置文件进行设置：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1450" target="_blank" rel="noopener noreferrer">#1450</a></li>
+  <li>修复 DBMS_UTILITY 回溯信息和调用栈输出中缺少 Package 名称以及 Schema 限定不正确的问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1471" target="_blank" rel="noopener noreferrer">#1471</a></li>
+  <li>修复 REGEXP_COUNT、REGEXP_SUBSTR、REGEXP_INSTR 和 REGEXP_REPLACE 中换行符处理及 m/n 选项行为不正确的问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1489" target="_blank" rel="noopener noreferrer">#1489</a></li>
+  <li>修复 Ivyresult 在提前返回路径上的内存泄漏问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1556" target="_blank" rel="noopener noreferrer">#1556</a></li>
+  <li>修复 psql 命名绑定查询转义及 \bind 处理过程中出现的堆缓冲区越界问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1569" target="_blank" rel="noopener noreferrer">#1569</a></li>
+  <li>修复 XML 函数在使用超长命名空间前缀或 URL 时可能出现的堆缓冲区溢出问题：PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1827" target="_blank" rel="noopener noreferrer">#1827</a></li>
+</ul>
+<h2 id="section-12">源代码仓库</h2>
+<p>
+  IvorySQL 的开发和维护分布在以下四个核心仓库：
+</p>
+<ul>
+  <li><a href="https://github.com/IvorySQL/IvorySQL" target="_blank" rel="noopener noreferrer">数据库源码</a>：<strong><a href="https://github.com/IvorySQL/IvorySQL" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/IvorySQL</a></strong></li>
+  <li><a href="https://github.com/IvorySQL/Ivory_www" target="_blank" rel="noopener noreferrer">官方网站</a>：<strong><a href="https://github.com/IvorySQL/Ivory_www" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/Ivory_www</a></strong></li>
+  <li><a href="https://github.com/IvorySQL/IvorySQL_docs" target="_blank" rel="noopener noreferrer">官方文档</a>：<strong><a href="https://github.com/IvorySQL/IvorySQL_docs" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/IvorySQL_docs</a></strong></li>
+  <li><a href="https://github.com/IvorySQL/docker_library" target="_blank" rel="noopener noreferrer">Docker 镜像</a>：<strong><a href="https://github.com/IvorySQL/docker_library" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/docker_library</a></strong></li>
+</ul>
+<h2 id="section-13">贡献者</h2>
+<p>
+  感谢以下贡献者（按字母顺序排列）以补丁作者、提交者、评审者、测试人员或问题报告者等身份参与 IvorySQL 5.6 的发布：
+</p>
+<ul>
+  <li>123123213weqw</li>
+  <li>Aias00</li>
+  <li>ai-yang</li>
+  <li>btlqql</li>
+  <li>Cédric Villemain</li>
+  <li>db-nikhil</li>
+  <li>digoal</li>
+  <li>enkilee</li>
+  <li>Fawei Zhao</li>
+  <li>Ge Sui</li>
+  <li>goeason-world</li>
+  <li>Grant Zhou</li>
+  <li>hanjianqiao</li>
+  <li>Kang Wang</li>
+  <li>lispking</li>
+  <li>messere1</li>
+  <li>NotHimmel</li>
+  <li>Shuntian Jiao</li>
+  <li>Steven Niu</li>
+  <li>tian1220A</li>
+  <li>Xiangyu Liang</li>
+  <li>Xiaohui Liu</li>
+  <li>Xinjie LYU</li>
+  <li>Xueyu Gao</li>
+  <li>xuhuicai</li>
+  <li>yaozichen2025</li>
+  <li>Yasir Hussain Shah</li>
+  <li>yyqdbngt</li>
+  <li>Z95-cmyk</li>
+  <li>Zhe Zhang</li>
+  <li>Zheng Tao</li>
+  <li>Zhenhao Pan</li>
+  <li>Zhuoyan Shi</li>
+</ul>
+<h2 id="section-14">欢迎使用</h2>
+<p>
+  <a href="https://github.com/IvorySQL/IvorySQL/compare/IvorySQL_5.4...IvorySQL_5.6" target="_blank" rel="noopener noreferrer">完整更新日志：IvorySQL 5.4 → 5.6</a>：
+</p>
+
+<p>
+  <strong><a href="https://github.com/IvorySQL/IvorySQL/compare/IvorySQL_5.4...IvorySQL_5.6" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/IvorySQL/compare/IvorySQL_5.4...IvorySQL_5.6</a></strong>
+</p>
+
+<p>
+  欢迎社区伙伴下载和体验 IvorySQL 5.6。
+</p>
+
+<p>
+  如果您在使用过程中发现问题，欢迎通过 IvorySQL 社区反馈。每一条问题反馈和改进建议，都是推动项目持续完善的重要力量。
+</p>
+
+<p>
+  期待与社区伙伴一起，持续完善 IvorySQL 开源数据库生态。
+</p>

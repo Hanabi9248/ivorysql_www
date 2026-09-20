@@ -1,0 +1,739 @@
+---
+slug: 2026-09-10-unified-multimodal-ai-agent-data-foundation
+title: "Building a Unified Multimodal Data Foundation for the Next Generation of AI Agents"
+author: "魏波"
+category: IvorySQL
+image: "/images/blog/covers/2026-09-10-unified-multimodal-ai-agent-data-foundation.png"
+tags: [PostgreSQL, AI Agent, pgvector, Multimodal, IvorySQL, HOW2026]
+description: "A data-foundation view of AI Agent requirements: combining pgvector, pgai, PostgresML, and Apache AGE with PostgreSQL 17/18/19 to argue for “data down, intelligence up.”"
+---
+> Presented by 魏波, Technical Consultant at Beijing Shengshu Technology, Deputy Secretary-General of the PG Branch.
+
+## Introduction
+
+Over the past two years, AI Agents have gradually moved from an application form of "model invocation + workflow" toward systems with memory, tool use, task planning, multi-agent collaboration, and continuous operation. At the same time, the problems enterprises encounter when landing AI Agents are also changing: what truly constrains a system's ability to scale is often no longer merely model capability, but **whether data, memory, retrieval, permissions, runtime state, and governance capability can form a reliable data foundation**.
+
+For enterprises, AI Agent data includes both traditional business data and documents, JSON, embeddings, conversation records, user preferences, task state, tool-call records, and entity relationships. Therefore, a question worth long-term discussion is:
+
+**Can PostgreSQL serve as the core, unifying as much data and AI data capability as possible into the same transactional and governance system, while still preserving openness to specialized AI services and dedicated infrastructure?**
+
+This article re-examines the path of PostgreSQL and AI convergence from the perspective of a "data foundation" rather than "the database does everything," and, drawing on pgvector, pgvectorscale, pgai, PostgresML, Apache AGE, and the evolution of PostgreSQL 17/18/19, discusses an architectural principle better suited to enterprise practice:
+
+**Data down, intelligence up; unification first, specialized systems fill the gaps; the database is responsible for reliable data and memory, while the Agent platform is responsible for orchestration and collaboration.**
+
+## 1. Current state and challenges: why AI Agents increasingly need a "data foundation"
+
+The core loop of an AI Agent can be abstracted as:
+
+```text
+User task
+   ↓
+Understanding and planning
+   ↓
+Retrieve memory / knowledge / business data
+   ↓
+Invoke tools and external systems
+   ↓
+Produce observations
+   ↓
+Update state, short-term memory, long-term memory
+   ↓
+Continue the loop or complete the task
+```
+
+This means that what an Agent depends on is not a single "vector database," but a set of mutually related data:
+
+- **Business facts**: structured data such as customers, orders, assets, organizations, accounts, and tickets.
+
+- **Unstructured knowledge**: documents, web pages, FAQs, rules and regulations, technical materials, and so on.
+
+- **Semantic data**: embeddings generated from text, images, and other content.
+
+- **Agent state**: sessions, tasks, execution steps, tool calls, events, and results.
+
+- **Memory data**: user preferences, historical facts, long-term experience, and summarized information.
+
+- **Relationship data**: entities, organizations, upstream and downstream relationships, and complex business associations.
+
+Therefore, the Agent's "memory problem" is essentially not a pure vector retrieval problem, but a **multimodal data management and consistency problem**.
+
+### 1.1 Common data foundation options
+
+The routes commonly seen in enterprises today can be roughly divided into four categories.
+
+**(1) Dedicated vector databases / vector retrieval engines**
+
+Representative products include Pinecone, Milvus, Qdrant, and others; FAISS is more accurately described as a vector similarity retrieval library rather than a standalone database product in the full sense.
+
+Their advantage is dedicated optimization around ANN retrieval, which can deliver very good performance and scalability in extremely large-scale vector scenarios. But if business facts are still stored in a relational database, issues such as data synchronization, ID association, permission filtering, deletion and updates, and consistency maintenance need to be considered.
+
+**(2) Cache / KV storage solutions**
+
+Representative products include Redis and others.
+
+Their advantage is low latency and flexible data structures, making them suitable for hot context, short-term state, session caching, and task coordination. But if large amounts of long-term memory, embeddings, and complex filter conditions are all placed into the cache system, cost, durability, and query capability will gradually become constraints.
+
+**(3) Object storage + retrieval compute layer**
+
+Representative products include S3, MinIO, and others. Object storage is very well suited to raw documents, images, audio, video, and other unstructured data, but it is not itself a complete vector retrieval database; additional indexing, embedding, retrieval, or compute services are usually still required.
+
+**(4) Relational database + vector / JSON / graph extensions**
+
+The typical route is PostgreSQL + pgvector, with JSON, full-text search, PostGIS, time-series extensions, or graph capability added as business needs require.
+
+Its core value is not that "it ranks first in performance in every scenario," but that it **keeps business facts, semantic data, and Agent state within the same data governance boundary as far as possible**.
+
+### 1.2 The real enterprise pain point: not the number of databases, but data boundaries
+
+When an enterprise simultaneously maintains a business database, a vector database, a graph database, a cache, and object storage, what is truly complex is not "having many systems" itself, but the following cross-system problems:
+
+- **Identity consistency**: how the same customer, user, device, or document maintains a unified ID across multiple systems.
+
+- **State consistency**: when embeddings, retrieval indexes, and caches are synchronized after business data is updated.
+
+- **Permission consistency**: whether a user's permissions in the business system can be correctly propagated to Agent retrieval results.
+
+- **Deletion consistency**: how old vectors and old caches are invalidated in time after data is deleted or permissions are revoked.
+
+- **Transaction boundaries**: whether business writes, memory updates, and audit records need to be within the same transaction boundary.
+
+- **Operational complexity**: how backup, monitoring, scaling, and troubleshooting across multiple systems are unified.
+
+So when enterprises choose an AI data foundation, they should not simply compare "whose vector QPS is higher," but should compare at the same time: **data consistency, filtering capability, transactional capability, permission model, operational cost, scalability, and ecosystem maturity**.
+
+## 2. A new convergence approach: from "assembling multiple systems" to a "unified data plane"
+
+PostgreSQL's value lies not in replacing all specialized databases, but in providing a mature relational database core and then, through its extension mechanism, bringing more of the data types and query capabilities that AI needs into the same governance system.
+
+### 2.1 Traditional AI Agent data architecture
+
+A typical architecture often looks like this:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/1.png)
+
+This route is not "wrong." When vector scale, graph query scale, object data scale, or real-time requirements reach a certain level, specialized systems become the more reasonable choice instead.
+
+The problem is: **if all data is split apart too early, the system will consume a great deal of engineering complexity on synchronization, permissions, and data governance rather than on AI capability itself.**
+
+### 2.2 PostgreSQL converged architecture
+
+The route better suited to most mid-sized enterprises and a large number of AI applications can be abstracted as:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/2.jpeg)
+
+The most critical change here is:
+
+**It is not "unify everything," but "unify first."**
+
+### 2.3 What does the PG converged architecture really solve?
+
+**First, fewer data copies.**
+
+Business data and embeddings can be managed within the same database system, reducing unnecessary cross-system replication pipelines created for retrieval purposes.
+
+**Second, stronger consistency capability.**
+
+When relational data, JSON, embeddings, and other data are managed within the same PostgreSQL transaction system, atomic updates and permission control can be achieved more naturally.
+
+**Third, support for combined queries.**
+
+Enterprise AI retrieval is often not "find Top-K only by vector similarity," but rather:
+
+```sql
+WHERE tenant_id = ?
+  AND department_id = ?
+  AND status = 'active'
+  AND created_at > ?
+ORDER BY embedding <=> ?
+LIMIT 20;
+```
+
+That is: **permission filtering + business filtering + time filtering + semantic similarity** all participate in the query.
+
+**Fourth, fewer systems to operate.**
+
+Especially for teams whose scale has not yet reached the point where multiple specialized databases must be adopted, a unified data plane can markedly reduce the complexity of deployment, monitoring, backup, and troubleshooting.
+
+### 2.4 One misconception to avoid: the database is not the Agent's brain
+
+"Pushing AI computation toward the data side" is easily understood as:
+
+PostgreSQL should ultimately become a complete LLM, Agent, Workflow, and multi-agent platform.
+
+This is not a reasonable goal for enterprise-level architecture.
+
+A more reasonable division of responsibilities is scientific division of labor and collaboration:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/3.jpeg)
+
+This is also the core criterion for the later discussion of cases such as pgai in this article.
+
+## 3. Community ecosystem: a full picture of PostgreSQL AI capabilities
+
+PostgreSQL's AI ecosystem is not a single product, but a combined system of "database kernel + extensions + external Agent/AI services."
+
+### 3.1 The vector core ecosystem
+
+Core components worth watching:
+
+- **pgvector**: one of PostgreSQL's most mature and most widely adopted vector extensions.
+
+- **pgvectorscale**: builds on pgvector to further provide high-performance vector retrieval based on the DiskANN approach.
+
+- **Other vector extensions**: selection can be based on distribution and specific scenarios, but activity level, compatible versions, and community support should be the key points of verification.
+
+For enterprise selection, one should not draw conclusions directly from a "vector extension leaderboard"; benchmark tests should instead be based on real data scale, filter conditions, recall, latency, and cost.
+
+### 3.2 In-database AI / ML ecosystem
+
+There are various "in-database AI" attempts in the PostgreSQL ecosystem, such as PostgresML, MADlib, and third-party extensions aimed at LLM/AI.
+
+The common idea behind such projects is:
+
+**Minimize data movement and bring models or inference capability closer to business data.**
+
+But "in-database inference" does not necessarily mean it is better than a standalone model service. Enterprises still need to judge based on model size, GPU utilization, elastic scaling, inference isolation, model lifecycle, and security policy.
+
+### 3.3 Graph and GraphRAG ecosystem
+
+A representative project worth watching is **Apache AGE**. AGE provides graph data capability through a PostgreSQL extension, introducing a graph model and openCypher query capability on top of a relational database.
+
+It must be emphasized in particular:
+
+**openCypher compatibility does not equal full compatibility with Neo4j.**
+
+In complex graph queries, deep traversal, and high-concurrency scenarios, whether to adopt AGE should be verified through real business benchmarks, rather than simply treating it as a complete replacement for a traditional graph database.
+
+### 3.4 Engineering and multimodal capabilities
+
+PostgreSQL itself can also enhance, through ecosystem components, the data infrastructure capabilities that enterprises need for AI:
+
+- **PostGIS**: spatial data.
+
+- **TimescaleDB / time-series extensions**: time-series and monitoring data.
+
+- **pg_cron**: in-database scheduling.
+
+- **pg_partman**: partition management automation.
+
+- **Full-text search capability**: used for keyword/full-text recall, and can form hybrid retrieval with vector recall.
+
+This means an AI application can progressively build:
+
++ Structured data
++ JSON / document metadata
++ Full-text search
++ Vector retrieval
++ Time-series data
++ Spatial data
++ Graph relationships
++ Agent state and memory
+
+rather than building six or seven databases from the very start.
+
+### 3.5 pgvector — the core foundation of PostgreSQL's vector capability
+
+pgvector adds vector data types, similarity computation, and approximate nearest neighbor indexing capability to PostgreSQL, and is one of the fundamental components in today's PG+AI architecture that is most worth mastering first.
+
+Currently pgvector supports multiple vector types, among which the vector type supports up to 2,000 dimensions; it also provides types such as halfvec, bit, and sparsevec, with different types corresponding to different limits on dimensions/non-zero elements. It supports two types of approximate nearest neighbor indexes, HNSW and IVFFlat.
+
+Particular attention should be paid to:
+
+**Approximate indexes are not a "free speedup." They are essentially a trade-off among recall, query latency, memory, and build cost.**
+
+For example, HNSW usually performs better in the speed/recall trade-off, but builds more slowly and uses more memory; IVFFlat builds faster and is relatively memory-friendly, but requires properly setting lists/probes and paying attention to the data scale when the index is built.
+
+#### Usage example: unified management of business data and vectors
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE agent_memories (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    memory_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(1536),
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_agent_memories_embedding
+ON agent_memories
+USING hnsw (embedding vector_cosine_ops);
+
+-- Semantic retrieval
+SELECT id,
+       content,
+       1 - (embedding <=> $1) AS similarity
+FROM agent_memories
+WHERE tenant_id = $2
+ORDER BY embedding <=> $1
+LIMIT 10;
+
+-- Business filtering + semantic retrieval
+SELECT id,
+       content,
+       1 - (embedding <=> $1) AS similarity
+FROM agent_memories
+WHERE tenant_id = $2
+  AND memory_type = 'preference'
+  AND created_at > NOW() - INTERVAL '90 days'
+ORDER BY embedding <=> $1
+LIMIT 10;
+```
+
+What really matters here is not the SQL itself, but that: **an Agent's memory, tenant boundaries, business filtering, and vector retrieval can work together within the same data model.**
+
+### 3.6 pgvectorscale — pushing PG vector retrieval to larger scale
+
+pgvectorscale is an extension introduced by Timescale around PostgreSQL vector retrieval; its core capabilities include StreamingDiskANN, quantization, and filtering optimization, and it is used together with pgvector. The project's publicly cited representative benchmark compares against a certain Pinecone index scheme on a 50-million-row, 768-dimensional Cohere Embedding dataset with a target of 99% recall. That benchmark shows lower P95 latency, higher throughput, and lower cost, but these figures should be understood as **results under specific test conditions, not a general conclusion for all scenarios**.
+
+Therefore, the value of pgvectorscale is best understood as:
+
+```text
+pgvector
+   ↓
+Basic vector types + HNSW / IVFFlat
+   ↓
+pgvectorscale
+   ↓
+Larger-scale vector retrieval + DiskANN approach + quantization + filtering optimization
+```
+
+#### Enterprise selection advice
+
+If the data scale is still in the millions or the low tens of millions, priority should be given to:
+
+- Embedding quality
+
+- Chunking strategy
+
+- Permission filtering
+
+- Hybrid Search
+
+- Rerank
+
+- Query rewriting
+
+- Recall and end-to-end latency
+
+rather than designing an architecture for "tens of billions of vectors" too early.
+
+When scale, cost, or latency truly becomes a bottleneck, then carry out second-stage optimization through pgvectorscale or a dedicated vector platform.
+
+### 3.7 pgai — a very valuable architecture evolution case
+
+pgai was once a set of tools that helped developers build RAG, semantic search, and agentic applications within the PostgreSQL system; it could automatically generate and synchronize embeddings around PostgreSQL data, and provided capabilities such as a semantic catalog and semantic search.
+
+As of the revision of this article, the pgai GitHub repository README explicitly states: **it has been unmaintained and unsupported since February 2026**; the GitHub repository shows that it was **formally archived by its owner on May 27, 2026, entering a read-only state**.
+
+#### The more noteworthy technical insight
+
+The pgai case should not be interpreted as:
+
+"The database should not touch AI."
+
+A more reasonable interpretation is:
+
+**First, data and semantic retrieval are naturally suited to being close to the database.**
+
+Work such as embeddings, vector retrieval, metadata filtering, and data synchronization has natural points of integration with PostgreSQL's data management capabilities.
+
+**Second, complex model invocation and Agent orchestration should maintain a service-oriented boundary.**
+
+LLM invocation typically involves high latency, external dependencies, rate limiting, cost, provider switching, and elasticity requirements. Therefore, in enterprise architecture, it is more appropriate to isolate it through an application service or an AI Gateway, rather than cramming the entire complex Agent Loop into the database.
+
+**Third, the database and AI services should form a division of labor rather than an either/or choice.**
+
+This can be abstracted as:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/4.png)
+
+#### Core conclusion
+
+**The convergence of PostgreSQL and AI should not pursue "the database becoming a complete AI platform," but should instead let the database become a reliable foundation for data, memory, and retrieval, and let the application layer take on model orchestration, the Agent Loop, and complex intelligent behavior.**
+
+### 3.8 PostgresML — another route for in-database AI
+
+PostgresML represents another line of thinking: bringing machine learning, NLP, embedding, or part of the inference capability even closer to PostgreSQL data.
+
+Its project repository currently still provides the open-source pgml extension and self-hosting options, and also offers a cloud service. Its positioning is to make PostgreSQL more convenient for carrying ML/AI workloads.
+
+Here a common misconception needs to be specifically corrected:
+
+**Neither "in-database inference = zero latency" nor "necessarily dozens of times faster than an HTTP model service" should be taken as a general conclusion.**
+
+Placing the model near the database can reduce data movement and extra network hops; but end-to-end performance still depends on model size, GPU, concurrency model, batch, data preparation, model loading, the thread/process model, and database resource contention.
+
+#### Scenarios better suited to in-database AI
+
+- Real-time prediction on structured data
+
+- Scenarios where feature computation and model inference are highly coupled
+
+- Businesses that need to reduce data egress
+
+- Small models, embeddings, or lightweight text processing
+
+- Scenarios that need to complete part of an AI transformation within a SQL query pipeline
+
+#### Scenarios not suited to forced in-database processing
+
+- Online inference with extremely large models
+
+- GPU resources that need independent elastic scaling
+
+- High-concurrency multi-tenant model serving
+
+- Frequent changes to model releases and rollbacks
+
+- An enterprise AI Gateway that needs cross-model, cross-provider routing
+
+Therefore, PostgresML is better understood as: **expanding the boundary of "how close data and AI can be," rather than eliminating the model service layer.**
+
+### 3.9 Apache AGE — complementary capability for knowledge graphs and GraphRAG
+
+Apache AGE is a graph extension for PostgreSQL; it allows a graph model to be used in PostgreSQL and supports openCypher-style graph queries. One of its goals is to add graph capability on top of relational data, thereby reducing the data replication brought by an extra graph storage system.
+
+But enterprises should avoid turning GraphRAG into "the default retrieval solution for all Agents."
+
+In many knowledge base scenarios, relying only on:
+
++ Keyword retrieval
++ Vector recall
++ Rerank
+
+is already enough to achieve very good results. Only when "the entity relationships themselves determine the answer" does graph retrieval truly demonstrate its value, for example:
+
+- Organizational and permission relationships
+
+- Device and dependency relationships
+
+- Product and supply chain relationships
+
+- Personnel and skill relationships
+
+- Complex fault propagation relationships
+
+#### A more reasonable hybrid retrieval model
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/5.jpeg)
+
+In this way, GraphRAG becomes part of the retrieval capability rather than a replacement for traditional RAG.
+
+## 4. PostgreSQL kernel evolution: which capabilities truly benefit AI workloads
+
+First, one statement needs to be corrected:
+
+**PostgreSQL 17, 18, and 19 are not versions "designed specifically for AI."**
+
+More accurately: the general-purpose database capabilities of these versions continue to improve, and some of these features happen to be very valuable for AI data processing, retrieval, and high-throughput workloads.
+
+### 4.1 PostgreSQL 17: a better foundation for data processing and maintenance
+
+PostgreSQL 17 was released on September 26, 2024. Its official highlights include a new VACUUM memory management mechanism, SQL/JSON enhancements, and several query and I/O performance improvements.
+
+#### JSON_TABLE
+
+JSON_TABLE() can map JSON data into relational results, which is valuable for handling LLM tool-call results, event data, and semi-structured input.
+
+#### VACUUM memory improvements
+
+PostgreSQL 17 introduced a new internal VACUUM memory structure, officially described as consuming **as little as up to one-twentieth of the previous memory**, while improving VACUUM performance. The rigorous phrasing "up to a 20x memory saving" should be used here, rather than understanding it as a fixed reduction to 1/20 for all tables and all scenarios.
+
+This is especially worth watching for frequently updated Agent state, session, event, and memory tables, but one should not conclude from this that "the bloat problem is completely solved."
+
+### 4.2 PostgreSQL 18: AIO is the infrastructure upgrade more worth watching
+
+PostgreSQL 18 was released on September 25, 2025. One of its notable changes is a new asynchronous I/O (AIO) subsystem, used to increase I/O parallelism in scenarios such as sequential scans, bitmap heap scans, and VACUUM. Official documentation states that some read scenarios can achieve up to about a 3x performance improvement, but this depends on the specific workload.
+
+PG 18 provides parameters such as io_method and io_workers to control how AIO is executed, and supports options including worker, io_uring, and sync.
+
+#### What does this mean for AI?
+
+At large scale, vector tables, knowledge bases, logs, and event tables can all in essence generate a large number of scans and I/O requests.
+
+Therefore, the significance of AIO for AI is:
+
+**It improves PostgreSQL's general-purpose I/O capability when processing large datasets, and these improvements can let AI data workloads benefit indirectly.**
+
+### 4.3 PostgreSQL 18: JSON performance and AI data processing
+
+PostgreSQL 18 applies SIMD optimization to the processing of long JSON strings, which is somewhat helpful for JSON tool calls, structured output, and event data processing in AI scenarios.
+
+### 4.4 PostgreSQL 18: Table AM / Index — what truly matters is the extension boundary
+
+PostgreSQL's access method system enables the community to explore different data access and storage structures through extensions. PG 18 adds functions such as amgettreeheight to the Index Access Method API, while further refining the related interfaces.
+
+For AI architecture, its strategic value lies in:
+
+**The PostgreSQL kernel provides a stable boundary for database execution, transactions, and extension, while vectors, column stores, and other special access methods can continue to be innovated by ecosystem components.**
+
+### 4.5 PostgreSQL 19: beyond AI, graph capability becomes a new direction worth watching
+
+As of the revision of this article, PostgreSQL 19 is still in the development/testing stage, and the official documentation marks it as a Development Version; Beta 3 was already released in August 2026, and the official GA date remains subject to PostgreSQL's official announcement.
+
+For the topic of "PostgreSQL + AI," PG 19 has one direction very much worth watching:
+
+**SQL/PGQ (Property Graph Queries) enters PostgreSQL 19.**
+
+This means that PostgreSQL's capability boundary in the convergence of relational data and graph queries may expand further in the future.
+
+In addition, PG 19 includes improvements in logical replication, Autovacuum, I/O, query planning, and other areas. Although these are not AI-specific, they have infrastructure value for large-scale Agent data platforms.
+
+## 5. From technical feasibility to enterprise deployment: a four-step action guide for PG + AI
+
+Enterprises should not start with "migrating the database," but with "validating data boundaries."
+
+### 5.1 Step one: start with a measurable Agent scenario
+
+Suggest prioritizing:
+
+- Enterprise knowledge base Q&A
+
+- IT operations knowledge assistant
+
+- Ticket intelligence assistant
+
+- Data query and analysis assistant
+
+- Account / asset / configuration queries
+
+Do not design a complete "AI data lake" right away.
+
+### 5.2 Step two: establish a unified data model
+
+It is recommended to unify at least the following objects:
+
+```text
+Tenant
+User
+Document
+Chunk
+Embedding
+Conversation
+Memory
+Task
+Tool Call
+Agent Event
+Audit Event
+```
+
+The core of this step is not database selection, but establishing **a stable data entity model and lifecycle rules**.
+
+### 5.3 Step three: clarify the boundaries among the Agent, the database, and model services
+
+The recommended enterprise-level boundary is:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/6.png)
+
+This avoids turning the database, Agent orchestration, and model services into one huge monolith.
+
+### 5.4 Step four: then do large-scale performance optimization
+
+Following the order below is usually more reasonable:
+
+```text
+RAG quality
+  ↓
+Hybrid retrieval
+  ↓
+Permission filtering
+  ↓
+Rerank
+  ↓
+Index and query optimization
+  ↓
+pgvectorscale / sharding / replicas
+  ↓
+Dedicated vector or search system
+```
+
+That is: **first solve "finding the right thing," then solve "finding it fast."**
+
+### 5.5 An enterprise metric system that is easily overlooked
+
+PG+AI deployment cannot look only at database QPS; it should at least pay attention to:
+
+| Metric | Focus |
+| --- | --- |
+| Recall@K | Recall quality |
+| NDCG / MRR | Ranking quality |
+| P95 / P99 | End-to-end latency |
+| Token Cost | Model cost |
+| Cache Hit Rate | Cache efficiency |
+| Context Utilization | Context utilization |
+| Memory Hit Rate | Effectiveness of Agent memory |
+| Data freshness | Embedding / index synchronization latency |
+| Permission accuracy | Risk of privilege escalation |
+| Data deletion latency | Compliance and lifecycle |
+
+This set of metrics is closer to real enterprise value than simply discussing "how many vectors the database can hold."
+
+## 6. A unified multimodal intelligent data foundation for the next generation of AI Agents
+
+After the preceding discussion, a more mature enterprise-level architecture can be abstracted as "six layers + two horizontal protocols/governance capabilities."
+
+### 6.1 Six-layer logical architecture
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/7.png)
+
+### 6.2 Where should A2A be placed?
+
+**It should be included, and it is a "horizontal capability," not a data foundation capability.**
+
+A2A (Agent2Agent) is positioned to let Agents that are independent of each other and possibly built by different frameworks or vendors perform discovery, task delegation, state interaction, and collaboration. The current A2A specification has developed to 1.0, and provides mechanisms such as Agent Card and synchronous/streaming/asynchronous task interaction.
+
+Therefore, in an enterprise Agent architecture, it is recommended to draw A2A as a **horizontal Agent collaboration channel**:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/8.png)
+
+**A2A is not responsible for storing an Agent's long-term memory, nor does it replace the database; it is responsible for "how Agents collaborate."**
+
+### 6.3 The relationship between MCP and A2A
+
+In enterprise architecture, a very easy-to-understand way to distinguish them is:
+
+```text
+MCP: Agent ↔ Tool / Data / Service
+      "How do I use a capability?"
+
+A2A: Agent ↔ Agent
+      "How do I collaborate with another Agent?"
+
+PostgreSQL: Data / Memory / State
+      "Where do facts, memory, and state live?"
+```
+
+Current official A2A material also describes MCP as leaning more toward "vertical capability access," while A2A leans more toward "horizontal Agent collaboration."
+
+Placed together, these three concepts precisely form the important foundational abstraction of a next-generation enterprise Agent platform:
+
+**MCP connects capabilities, A2A connects Agents, and PostgreSQL connects data.**
+
+### 6.4 What should a "unified data foundation" ultimately unify?
+
+It should not unify only database instances, but the following objects and governance boundaries:
+
+```text
+Unified identity
+   ↓
+Unified data model
+   ↓
+Unified memory model
+   ↓
+Unified retrieval interface
+   ↓
+Unified permission filtering
+   ↓
+Unified lifecycle
+   ↓
+Unified audit and observability
+```
+
+This is more valuable than "putting everything into PostgreSQL."
+
+### 6.5 When should PostgreSQL give way to specialized systems?
+
+This is the boundary that this article must add.
+
+If the following situations occur, specialized systems should be seriously evaluated:
+
+#### Ultra-large-scale vector retrieval
+
+When vector scale, concurrency, recall, and cost requirements clearly exceed the economic range of a single PostgreSQL cluster, a dedicated vector database or search platform can be introduced.
+
+#### Ultra-large-scale graph computation
+
+If the core business is complex graph traversal, graph algorithms, and ultra-large-scale relationship networks, a dedicated graph database or graph computing platform should be considered.
+
+#### Massive raw files
+
+Images, video, audio, raw documents, and the like are still better suited to object storage; PostgreSQL stores metadata, permissions, index information, and key structured state.
+
+#### High-intensity OLAP / data lake analytics
+
+When data analysis has already entered the realm of PB-level offline computation, complex OLAP, or data lakes, a dedicated analytical system should be adopted, rather than forcing an OLTP database to take on all tasks.
+
+Ultimately forming:
+
+**PostgreSQL serves as the core data plane, while specialized systems fill in capabilities at the scale boundary.**
+
+## 7. Conclusion: the true strategic value of PostgreSQL + AI
+
+After this re-examination, several conclusions more important than "is PG an AI database" can be drawn.
+
+### 7.1 PostgreSQL's most important value is not "becoming a vector database"
+
+pgvector enables PostgreSQL to handle vector storage and retrieval well, but PostgreSQL's truly irreplaceable advantage comes from:
+
+**Relational data + transactions + permissions + JSON + retrieval + vectors + extension ecosystem.**
+
+### 7.2 "Unification" should take priority, but should not be absolutized
+
+Unification can reduce data synchronization and operational complexity, but specialized systems still have reasons to exist.
+
+The correct principle is not:
+
+"Put all AI data in PG."
+
+but rather:
+
+**Unify wherever possible, and split only when the scale boundary of a specialized system is reached.**
+
+### 7.3 The database should be the data foundation, and the Agent platform should do intelligent orchestration
+
+Enterprise-level architecture needs to clarify:
+
+![img](/images/blog/2026-09-10-unified-multimodal-ai-agent-data-foundation/9.png)
+
+This set of boundaries is more evolvable over the long term than "cramming all of AI into the database."
+
+### 7.4 PostgreSQL's next-stage opportunity lies in the "data plane"
+
+As Agents move from one-off Q&A to long-term operation, what the data foundation needs to preserve is no longer only business data, but:
+
++ Facts
++ Knowledge
++ Embeddings
++ Memory
++ State
++ Events
++ Audit
++ Relationships
+
+This is precisely the data world in which PostgreSQL has strong capabilities.
+
+### 7.5 Final conclusion
+
+**The next generation of enterprise AI Agents does not need an "omnipotent" super database, but a reliable, governable, and scalable data plane.**  **PostgreSQL's best positioning is certainly not to become the AI orchestration center, but to become the Agent's unified foundation for data, memory, and state; the Agent platform handles intelligent orchestration, the AI Gateway handles model services, MCP handles capability access, and A2A handles Agent collaboration.**  Once these boundaries are correctly drawn, PostgreSQL + AI truly acquires the enterprise-level value of moving from "usable" to "production-ready, governable, and evolvable."
+
+## Further reading and resource navigation
+
+### PostgreSQL official
+
+- PostgreSQL 17 Release Notes: <https://www.postgresql.org/docs/17/release-17.html>
+
+- PostgreSQL 18 Release Notes: <https://www.postgresql.org/docs/18/release-18.html>
+
+- PostgreSQL 19 Release Notes: <https://www.postgresql.org/docs/19/release-19.html>
+
+### PostgreSQL AI ecosystem
+
+- pgvector: <https://github.com/pgvector/pgvector>
+
+- pgvectorscale: <https://github.com/timescale/pgvectorscale>
+
+- pgai: <https://github.com/timescale/pgai>
+
+- PostgresML: <https://github.com/postgresml/postgresml>
+
+- Apache AGE: <https://github.com/apache/age>
+
+### Agent protocols
+
+- A2A Protocol: <https://a2a-protocol.org/latest/>
+
+- A2A Specification: <https://a2a-protocol.org/latest/specification/>
