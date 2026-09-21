@@ -9,6 +9,8 @@ description: "一次类型转换如何悄悄破坏 Postgres_fdw 的 Join 下推�
 ---
 
 
+[观看回放](https://www.bilibili.com/video/BV1BjLM6tEnT/)
+
 ## 一、问题现象：一条 SQL 的本地与远程执行差距
 
 这是一个来自真实生产环境的案例。一条 SQL 在本地 PostgreSQL 实例上执行只需 **17 毫秒**，但通过 Postgres_fdw 访问远程数据库时，耗时长达 **200 秒**。两者相差超过一万倍。

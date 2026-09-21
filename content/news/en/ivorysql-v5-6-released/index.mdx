@@ -1,0 +1,198 @@
+---
+title: "IvorySQL 5.6 Released: Powered by PostgreSQL 18.6 with an Instant Sandbox"
+date: "2026-09-18"
+category: "product"
+categoryLabel: "Product"
+description: "Built on PostgreSQL 18.6, IvorySQL 5.6 introduces an AI-assisted contribution guide, PGNexus sandbox support, and a set of Oracle compatibility, memory-safety, and client-interface fixes."
+image: "/images/news/ivorysql-v5-6-en.png"
+slug: "ivorysql-v5-6-released"
+---
+
+<p>
+  On September 18, 2026, the IvorySQL community officially released IvorySQL 5.6.
+</p>
+
+<p>
+  As an Oracle-compatible open-source PostgreSQL database, IvorySQL 5.6 upgrades the PostgreSQL kernel to 18.6 and delivers a number of fixes and improvements in Oracle compatibility, memory safety, client interfaces, and extension building. In addition, IvorySQL 5.6 introduces AI-assisted contribution guidelines, completes multiple bug fixes, and continues to improve the online experience, cloud-native deployment, and extension ecosystem support.
+</p>
+
+<p>
+  This release also adapts to the PGNexus sandbox: without any local installation, users can build an IvorySQL 5.6 experimental environment online with one click, with support for patch application and test validation across multiple topologies including standalone, streaming replication, logical replication, and high-availability clusters, providing a convenient entry point for zero-barrier exploration of the new version, AI-assisted experimentation, and community collaboration.
+</p>
+<h2 id="postgresql-186-kernel-update">PostgreSQL 18.6 kernel update</h2>
+<p>
+  IvorySQL 5.6 is upgraded in sync with PostgreSQL 18.6.
+</p>
+
+<p>
+  It is worth noting that PostgreSQL 18.5 was found to have a regression during the release preparation stage, so it was never officially released. IvorySQL 5.6 performs its kernel upgrade directly based on PostgreSQL 18.6.
+</p>
+
+<p>
+  PostgreSQL 18.6 mainly includes the following updates:
+</p>
+<ol>
+  <li>Added the server parameter <code>output_plugin_libraries</code>, which restricts logical decoding output plugins to a specified set of plugins;</li>
+  <li>Fixed the detection of unsupported password algorithms in PGP encryption in contrib/pgcrypto;</li>
+  <li>Fixed data handling when psql executes a scripted <code>COPY ... FROM STDIN</code> command, so that subsequent inline data can be skipped correctly even if <code>COPY</code> fails before sending <code>PGRES_COPY_IN</code>;</li>
+  <li>Added checks for <code>USAGE</code> privileges on data types in scenarios where such checks were previously absent;</li>
+  <li>Invalidated cached execution plans that depend on a role after the role is changed;</li>
+  <li>Ensured that parallel GIN index builds correctly update the table's <code>pg_class.reltuples</code> value.</li>
+</ol>
+<p>
+  For more details, see the <a href="https://www.postgresql.org/docs/release/18.6/" target="_blank" rel="noopener noreferrer">PostgreSQL 18.6 official release notes</a>:
+</p>
+
+<p>
+  <strong><a href="https://www.postgresql.org/docs/release/18.6/" target="_blank" rel="noopener noreferrer">https://www.postgresql.org/docs/release/18.6/</a></strong>
+</p>
+<h2 id="key-features-of-ivorysql-56">Key features of IvorySQL 5.6</h2>
+<h3 id="upgrade-to-the-postgresql-186-kernel">Upgrade to the PostgreSQL 18.6 kernel</h3>
+<p>
+  The IvorySQL kernel is upgraded to PostgreSQL 18.6, gaining the relevant fixes and updates from the upstream PostgreSQL version while keeping database capabilities evolving continuously.
+</p>
+<h3 id="ivorysql-56-sandbox">IvorySQL 5.6 sandbox</h3>
+<p>
+  PGNexus is newly adapted for IvorySQL 5.6, opening up a zero-barrier, cloud-based AI-assisted experimentation experience!
+</p>
+
+<p>
+  As a one-stop knowledge and experimentation platform for all scenarios, PGNexus now supports the latest IvorySQL 5.6. No local installation is required — an environment can be built online with one click through the sandbox. It supports patch application and test validation, covering multiple topologies including standalone, streaming replication, logical replication, and high-availability clusters, and is ready to use out of the box, helping universities, enterprises, and developers collaborate efficiently and explore new version features at high speed.
+</p>
+<ul>
+  <li>Learn about <a href="https://pgnexus.ai" target="_blank" rel="noopener noreferrer">PGNexus</a>: <strong><a href="https://pgnexus.ai" target="_blank" rel="noopener noreferrer">https://pgnexus.ai</a></strong></li>
+  <li>Try the <a href="https://pgnexus.ai/sandboxes" target="_blank" rel="noopener noreferrer">IvorySQL 5.6 sandbox</a> now: <strong><a href="https://pgnexus.ai/sandboxes" target="_blank" rel="noopener noreferrer">https://pgnexus.ai/sandboxes</a></strong></li>
+</ul>
+<h3 id="experience-ivorysql-56-online">Experience IvorySQL 5.6 online</h3>
+<p>
+  IvorySQL 5.6 provides a browser-based interactive online environment. Users can experience IvorySQL 5.6 online without installing the database and explore and evaluate related features in real time.
+</p>
+
+<p>
+  <a href="http://trial.ivorysql.org/" target="_blank" rel="noopener noreferrer">Online trial address</a>: <strong><a href="http://trial.ivorysql.org/" target="_blank" rel="noopener noreferrer">http://trial.ivorysql.org/</a></strong>
+</p>
+<h3 id="ai-assisted-contribution-guidelines">AI-assisted contribution guidelines</h3>
+<p>
+  As AI tools are increasingly applied to software development and open-source collaboration, IvorySQL 5.6 establishes guidelines for AI-assisted contributions. The guidelines cover license compliance, human review and signing responsibility, instructions for using AI tools, disclosure of the proportion of AI-generated code, and responsible participation in code review, providing norms for AI-assisted participation in IvorySQL community contributions.
+</p>
+<h3 id="all-platform-release-support">All-platform release support</h3>
+<p>
+  IvorySQL 5.6 provides multi-platform installation media covering the X86, ARM, MIPS, and LoongArch architectures, meeting deployment needs on different hardware platforms.
+</p>
+<h3 id="cloud-native-containerized-deployment">Cloud-native containerized deployment</h3>
+<p>
+  IvorySQL 5.6 supports rapid deployment of standalone or high-availability database clusters through Docker Compose, Podman, Swarm, Helm, and the IvorySQL 5.6 Operator. Through a variety of containerized deployment methods, it supports IvorySQL deployment in different application environments.
+</p>
+<h3 id="ivorysql-cloud-56-released">IvorySQL Cloud 5.6 released</h3>
+<p>
+  IvorySQL Cloud 5.6 is a visual platform for full lifecycle database management, providing IvorySQL 5.6 database subscription management, end-to-end lifecycle operations orchestration, and integration of surrounding ecosystem services.
+</p>
+<h3 id="extensions-and-tools">Extensions and tools</h3>
+<p>
+  IvorySQL 5.6 currently supports a total of 34 extensions and tools, covering scenarios such as AI, vector search, full-text search, geographic information, database operations and maintenance, partitioned table management, and data integration, including:
+</p>
+<ul>
+  <li>AI and vector: pg_ai_query, pgvector</li>
+  <li>Graph database: AGE</li>
+  <li>Full-text search and Chinese word segmentation: pg_bigm, pg_jieba, PGroonga, pg_textsearch, zhparser</li>
+  <li>Geographic information and road networks: PostGIS, pgRouting</li>
+  <li>Database operations and monitoring: pg_profile, pg_readonly, pg_repack, pg_show_plans, pg_stat_monitor, system_stats, pgnodemx</li>
+  <li>Partitioned table management: pg_partman</li>
+  <li>Scheduling and job management: pg_cron, pgagent</li>
+  <li>Data loading and backup: pg_bulkload, pgBackRest</li>
+  <li>SQL and database tools: ddlx, pg_hint_plan, plpgsql_check</li>
+  <li>Temporary tables: pgtt</li>
+  <li>Auditing and privileges: pgaudit, set_user</li>
+  <li>Connection pooling and database proxies: pgBouncer, PgDog</li>
+  <li>Network access: pg_curl, pgsql-http</li>
+  <li>Heterogeneous data integration: redis_fdw</li>
+  <li>WAL log decoding: wal2json</li>
+</ul>
+<h2 id="bug-fixes">Bug fixes</h2>
+<p>
+  IvorySQL 5.6 includes a number of bug fixes for Oracle compatibility, parameter configuration, memory safety, client interfaces, and extension building.
+</p>
+<ul>
+  <li>Fixed possible overflow and NaN handling issues in Oracle-compatible interval multiplication and division: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1211" target="_blank" rel="noopener noreferrer">#1211</a></li>
+  <li>Prohibited persistent setting of <code>ivorysql.compatible_mode</code> through ALTER USER/ROLE/DATABASE SET, and fixed issues where <code>SET ... TO DEFAULT</code> and <code>RESET</code> of certain parameters could bypass the restriction: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1372" target="_blank" rel="noopener noreferrer">#1372</a></li>
+  <li>Fixed an issue during expression evaluation where Package-qualified variable references could resolve to unrelated local variables: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1381" target="_blank" rel="noopener noreferrer">#1381</a></li>
+  <li>Fixed build failures when building with GCC 14 and later versions: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1385" target="_blank" rel="noopener noreferrer">#1385</a></li>
+  <li>Fixed the validation of conflicting or duplicate SHARD options in sequences: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1401" target="_blank" rel="noopener noreferrer">#1401</a></li>
+  <li>Fixed build failures when third-party PostgreSQL extensions are built against IvorySQL: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1448" target="_blank" rel="noopener noreferrer">#1448</a></li>
+  <li>Made <code>ivorysql.enable_case_switch</code> visible in SHOW ALL and supported setting it through the configuration file: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1450" target="_blank" rel="noopener noreferrer">#1450</a></li>
+  <li>Fixed missing Package names and incorrect schema qualification in DBMS_UTILITY backtrace and call stack output: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1471" target="_blank" rel="noopener noreferrer">#1471</a></li>
+  <li>Fixed incorrect newline handling and m/n option behavior in REGEXP_COUNT, REGEXP_SUBSTR, REGEXP_INSTR, and REGEXP_REPLACE: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1489" target="_blank" rel="noopener noreferrer">#1489</a></li>
+  <li>Fixed a memory leak in Ivyresult on early-return paths: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1556" target="_blank" rel="noopener noreferrer">#1556</a></li>
+  <li>Fixed a heap buffer out-of-bounds issue in psql named bind query escaping and <code>\bind</code> handling: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1569" target="_blank" rel="noopener noreferrer">#1569</a></li>
+  <li>Fixed a possible heap buffer overflow in XML functions when using extremely long namespace prefixes or URLs: PR <a href="https://github.com/IvorySQL/IvorySQL/pull/1827" target="_blank" rel="noopener noreferrer">#1827</a></li>
+</ul>
+<h2 id="source-repositories">Source repositories</h2>
+<p>
+  The development and maintenance of IvorySQL is distributed across the following four core repositories:
+</p>
+<ul>
+  <li><a href="https://github.com/IvorySQL/IvorySQL" target="_blank" rel="noopener noreferrer">Database source</a>: <strong><a href="https://github.com/IvorySQL/IvorySQL" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/IvorySQL</a></strong></li>
+  <li><a href="https://github.com/IvorySQL/Ivory_www" target="_blank" rel="noopener noreferrer">Official website</a>: <strong><a href="https://github.com/IvorySQL/Ivory_www" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/Ivory_www</a></strong></li>
+  <li><a href="https://github.com/IvorySQL/IvorySQL_docs" target="_blank" rel="noopener noreferrer">Official documentation</a>: <strong><a href="https://github.com/IvorySQL/IvorySQL_docs" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/IvorySQL_docs</a></strong></li>
+  <li><a href="https://github.com/IvorySQL/docker_library" target="_blank" rel="noopener noreferrer">Docker images</a>: <strong><a href="https://github.com/IvorySQL/docker_library" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/docker_library</a></strong></li>
+</ul>
+<h2 id="contributors">Contributors</h2>
+<p>
+  Thanks to the following contributors (in alphabetical order) who participated in the IvorySQL 5.6 release as patch authors, committers, reviewers, testers, or issue reporters:
+</p>
+<ul>
+  <li>123123213weqw</li>
+  <li>Aias00</li>
+  <li>ai-yang</li>
+  <li>btlqql</li>
+  <li>Cédric Villemain</li>
+  <li>db-nikhil</li>
+  <li>digoal</li>
+  <li>enkilee</li>
+  <li>Fawei Zhao</li>
+  <li>Ge Sui</li>
+  <li>goeason-world</li>
+  <li>Grant Zhou</li>
+  <li>hanjianqiao</li>
+  <li>jerome-peng</li>
+  <li>Kang Wang</li>
+  <li>lispking</li>
+  <li>messere1</li>
+  <li>NotHimmel</li>
+  <li>Shuntian Jiao</li>
+  <li>Steven Niu</li>
+  <li>tian1220A</li>
+  <li>Xiangyu Liang</li>
+  <li>Xiaohui Liu</li>
+  <li>Xinjie LYU</li>
+  <li>Xueyu Gao</li>
+  <li>xuhuicai</li>
+  <li>yaozichen2025</li>
+  <li>Yasir Hussain Shah</li>
+  <li>yyqdbngt</li>
+  <li>Z95-cmyk</li>
+  <li>Zhe Zhang</li>
+  <li>Zheng Tao</li>
+  <li>Zhenhao Pan</li>
+  <li>Zhuoyan Shi</li>
+</ul>
+<h2 id="get-started">Get started</h2>
+<p>
+  <a href="https://github.com/IvorySQL/IvorySQL/compare/IvorySQL_5.4...IvorySQL_5.6" target="_blank" rel="noopener noreferrer">Complete changelog: IvorySQL 5.4 → 5.6</a>:
+</p>
+
+<p>
+  <strong><a href="https://github.com/IvorySQL/IvorySQL/compare/IvorySQL_5.4...IvorySQL_5.6" target="_blank" rel="noopener noreferrer">https://github.com/IvorySQL/IvorySQL/compare/IvorySQL_5.4...IvorySQL_5.6</a></strong>
+</p>
+
+<p>
+  We welcome community partners to download and try IvorySQL 5.6.
+</p>
+
+<p>
+  If you encounter any issues during use, please give feedback through the IvorySQL community. Every issue report and improvement suggestion is an important force driving the project's continuous improvement.
+</p>
+
+<p>
+  We look forward to working with community partners to continuously improve the IvorySQL open-source database ecosystem.
+</p>

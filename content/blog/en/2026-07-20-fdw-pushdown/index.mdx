@@ -10,6 +10,8 @@ description: "How a type-conversion node silently broke Postgres_fdw's Join push
 
 > Based on Nickyoung's (PostgreSQL ACE) presentation at HOW 2026.
 
+[Watch the replay](https://www.bilibili.com/video/BV1BjLM6tEnT/)
+
 ## 1. The Problem: A Local vs Remote SQL Performance Gap
 
 A real production case: a SQL query executes in **17 milliseconds** on a local PostgreSQL instance, but through Postgres_fdw accessing a remote database, it takes **200 seconds** — over 10,000x slower.

@@ -32,7 +32,7 @@
     "author": "Tang Cheng",
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
-    "position": "Senior Database Architect, Founder & CTO of Zqshucheng Technology"
+    "position": "Senior Database Architect"
   },
   {
     "author_id": "ShunWah",
@@ -46,7 +46,7 @@
     "author": "Yang Yu",
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
-    "position": "PG ACE, Harbin User Group Core Member"
+    "position": "PG ACE"
   },
   {
     "author_id": "ZhangChen",
@@ -81,7 +81,7 @@
     "author": "Liu Zhilong",
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
-    "position": "PG Database Expert, Ping An Technology"
+    "position": "PG Database Expert"
   },
   {
     "author_id": "Nickyoung",
@@ -123,7 +123,7 @@
     "author": "Wei Bo",
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
-    "position": "Deputy Secretary-General, PG Branch (China)"
+    "position": "Deputy Secretary-General"
   },
   {
     "author_id": "侯志杰",
@@ -179,7 +179,7 @@
     "author": "Wei Bo",
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
-    "position": "Deputy Secretary-General, PG Branch (China)"
+    "position": "Deputy Secretary-General"
   },
   {
     "author_id": "Hou Zhijie",
@@ -201,5 +201,47 @@
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
     "position": "PostgreSQL ACE"
+  },
+  {
+    "author_id": "Shawn Yan",
+    "author": "Shawn Yan",
+    "author_url": "https://github.com/shawn0915",
+    "author_image_url": "https://github.com/shawn0915.png",
+    "position": "Contributor"
+  },
+  {
+    "author_id": "Tang Cheng",
+    "author": "Tang Cheng",
+    "author_url": "https://github.com/IvorySQL",
+    "author_image_url": "https://github.com/ivorysql.png",
+    "position": "Senior Database Architect"
+  },
+  {
+    "author_id": "Yang Yu",
+    "author": "Yang Yu",
+    "author_url": "https://github.com/IvorySQL",
+    "author_image_url": "https://github.com/ivorysql.png",
+    "position": "PG ACE"
+  },
+  {
+    "author_id": "Tao Zheng",
+    "author": "Tao Zheng",
+    "author_url": "https://github.com/IvorySQL",
+    "author_image_url": "https://github.com/ivorysql.png",
+    "position": "IvorySQL Core Contributor"
+  },
+  {
+    "author_id": "Jiao Shuntian",
+    "author": "Jiao Shuntian",
+    "author_url": "https://github.com/jiaoshuntian",
+    "author_image_url": "https://github.com/jiaoshuntian.png",
+    "position": "Contributor"
+  },
+  {
+    "author_id": "Liu Zhilong",
+    "author": "Liu Zhilong",
+    "author_url": "https://github.com/IvorySQL",
+    "author_image_url": "https://github.com/ivorysql.png",
+    "position": "PG Database Expert"
   }
 ]

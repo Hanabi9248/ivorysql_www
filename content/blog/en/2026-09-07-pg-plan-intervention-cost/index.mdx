@@ -10,6 +10,8 @@ description: "How a 1% fuzzy cost comparison silently broke LIMIT and HINT behav
 
 > This article is based on Nickyoung's (PostgreSQL ACE) presentation at HOW 2026.
 
+[Watch the replay](https://www.bilibili.com/video/BV1iwLu6oEE5/)
+
 ## Preface
 
 In the day-to-day operations of database systems, a SQL execution plan "going off course" is one of the most vexing problems for DBAs. A single SQL statement executes in no time without LIMIT, yet adding LIMIT makes it thousands of times slower; an index is explicitly specified via HINT, yet the optimizer turns a deaf ear and performs a sequential scan. What mechanisms exactly lie hidden behind these seemingly "dumbed-down" behaviors?
