@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 /**
- * Builds `alternates.languages` for a page given its locale-neutral path
+ * Builds canonical and language alternates for the current page locale and path
  * (no locale prefix, e.g. "/blog/my-post" or "" for the homepage).
  * Relies on metadataBase (set in the root layout) to resolve to absolute URLs.
  *
@@ -11,6 +11,7 @@ import type { Metadata } from "next";
  */
 export function buildAlternates(
   path: string,
+  locale: string,
   availableLocales?: readonly ("en" | "zh")[],
 ): Metadata["alternates"] {
   const normalizedPath = path === "/" ? "" : path;
@@ -22,12 +23,12 @@ export function buildAlternates(
   const languages = Object.fromEntries(
     locales.map((locale) => [locale, allLanguages[locale]]),
   );
-  const canonicalPath = languages.en ?? languages.zh ?? (normalizedPath || "/");
+  const defaultPath = languages.en ?? languages.zh ?? (normalizedPath || "/");
   return {
-    canonical: canonicalPath,
+    canonical: languages[locale] ?? defaultPath,
     languages: {
       ...languages,
-      "x-default": canonicalPath,
+      "x-default": defaultPath,
     },
   };
 }
