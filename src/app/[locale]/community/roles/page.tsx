@@ -15,7 +15,7 @@ export async function generateMetadata({
   return {
     title: t("metaTitle"),
     description: t("metaDescription"),
-    alternates: buildAlternates("/community/roles"),
+    alternates: buildAlternates("/community/roles", locale),
     openGraph: {
       title: t("heading"),
       description: t("metaDescription"),
