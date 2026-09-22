@@ -33,7 +33,7 @@ export async function generateMetadata({
     return {
       title: item.title,
       description: item.description,
-      alternates: buildAlternates(item.path, availableLocales),
+      alternates: buildAlternates(item.path, locale, availableLocales),
       openGraph: {
         title: item.title,
         description: item.description,
