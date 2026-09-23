@@ -157,13 +157,22 @@ const FORMAT_ORDER = new Map(
   DB_FORMATS.map((format, index) => [format, index]),
 );
 
+function compareBuildNames(a: string, b: string): number {
+  const dateA = /-(\d{8})\.[^.]+\.(?:rpm|deb)$/.exec(a)?.[1];
+  const dateB = /-(\d{8})\.[^.]+\.(?:rpm|deb)$/.exec(b)?.[1];
+  if (dateA && dateB && dateA !== dateB) {
+    return dateA > dateB ? 1 : -1;
+  }
+  return a === b ? 0 : a > b ? 1 : -1;
+}
+
 function buildPackages(
   release: RawRelease,
   md5s: Record<string, string>,
 ): DbPackage[] {
   // Keyed by arch+format so a release carrying two builds for one target
-  // resolves deterministically to the later one — filenames end in a build
-  // date, so the greater filename wins.
+  // resolves to the later build date. The preceding git hash is not ordered
+  // chronologically; use the full filename only as a tie-break or fallback.
   const byTarget = new Map<string, DbPackage>();
 
   for (const asset of release.assets) {
@@ -172,7 +181,8 @@ function buildPackages(
 
     const key = `${target.arch}-${target.format}`;
     const incumbent = byTarget.get(key);
-    if (incumbent && incumbent.filename >= asset.name) continue;
+    if (incumbent && compareBuildNames(incumbent.filename, asset.name) >= 0)
+      continue;
 
     byTarget.set(key, {
       arch: target.arch,
