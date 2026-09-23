@@ -149,20 +149,24 @@ export function getAllCategories(locale: string): string[] {
 }
 
 function parseDateFromFilename(dirName: string): string {
-  const match = dirName.match(/^(\d{4}-\d{1,2}-\d{1,2})-/);
-  return match ? match[1] : "2024-01-01";
+  const match = dirName.match(/^(\d{4})-(\d{1,2})-(\d{1,2})-/);
+  return match
+    ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`
+    : "2024-01-01";
 }
 
 function formatDate(dateStr: string, locale: string): string {
   const date = new Date(dateStr + "T00:00:00Z");
   if (locale === "zh") {
     return date.toLocaleDateString("zh-CN", {
+      timeZone: "UTC",
       year: "numeric",
       month: "long",
       day: "numeric",
     });
   }
   return date.toLocaleDateString("en-US", {
+    timeZone: "UTC",
     day: "numeric",
     month: "short",
     year: "numeric",

@@ -148,12 +148,14 @@ function formatDate(dateStr: string, locale: string): string {
   const date = new Date(dateStr + "T00:00:00Z");
   if (locale === "zh") {
     return date.toLocaleDateString("zh-CN", {
+      timeZone: "UTC",
       year: "numeric",
       month: "long",
       day: "numeric",
     });
   }
   return date.toLocaleDateString("en-US", {
+    timeZone: "UTC",
     day: "numeric",
     month: "short",
     year: "numeric",
