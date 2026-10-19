@@ -1,0 +1,129 @@
+---
+slug: "pgnexus-postgresql-sandbox"
+title: "PostgreSQL 18 Without Installation—and Even Kernel Patch Testing: A Hands-On PGNexus Tour"
+date: "2026-10-15"
+author: "ShunWah"
+category: "PostgreSQL"
+image: "/images/blog/covers/pgnexus-postgresql-sandbox-en.png"
+tags: ["PGNexus", "PostgreSQL", "Sandbox", "AI"]
+description: "A hands-on tour of PostgreSQL 18 and IvorySQL 5.6 sandboxes, kernel patch testing, physical replication, benchmarks, and AI assistance on PGNexus."
+---
+
+> Author: Ma Shunhua (shunwah, known as “Database Huashao”)
+> Originally published in the WeChat publication “shunwah星辰数智社” on September 30, 2026.
+
+---
+
+## Hook
+
+Guess what: this time I “installed” PostgreSQL without ever touching an installation package.
+
+During the September 12 IvorySQL session, I explored PGNexus from account registration to benchmarking. Getting PG 18 ready took a few clicks and one verification email—**no compilation and no installation command**.
+
+> “The shortest route to a database is an email registration, not an installer download.”
+
+**What is PGNexus?** A full-stack PostgreSQL platform for collaboration across industry, education, and research, bringing learning, development, review, experiments, and teamwork together. It also hosts community information, a knowledge base, contributor profiles, organizations, and jobs. Here I focus on the part that drew me in: **the Sandbox Lab**, described as a browser-based PostgreSQL lab spanning SQL exploration through kernel patch development.
+
+You can register at pgnexus.ai and follow along. The screenshots below are the original interfaces from my hands-on session, without retouching.
+
+![Figure 01 · PGNexus home page](/images/blog/pgnexus-postgresql-sandbox/20260910-2098058050003869696_461941.png)
+
+## 01 Basic Sandbox: Register an Email, Get PG 18
+
+**Think of a sandbox as a test drive: it is reclaimed automatically when time runs out, without a return procedure.**
+
+Registration needs an email address. The verification link remains valid for 24 hours; verify it, sign in, and enter the lab.
+
+![Figure 02 · Registration](/images/blog/pgnexus-postgresql-sandbox/20260910-2098058524031016960_461941.png)
+
+![Figure 03 · Successful login](/images/blog/pgnexus-postgresql-sandbox/20260910-2098059554949505024_461941.png)
+
+The first stop is the sandbox environment: an isolated database environment for testing and experiments.
+
+![Figure 04 · Sandbox environment](/images/blog/pgnexus-postgresql-sandbox/20260910-2098059861645402112_461941.png)
+
+The launch interface offers PostgreSQL 18, 17, 16, 15, and 14. As a DBA, I instinctively chose the newest version, 18.
+
+![Figure 05 · Launching a sandbox](/images/blog/pgnexus-postgresql-sandbox/20260910-2098061231399723008_461941.png)
+
+A few seconds later, the sandbox ID starting with u4sg4spc showed PG 18 as ready. The clean instance had **26:37** remaining, with a button to extend it by 30 minutes. I like that countdown: it clearly communicates that this is temporary infrastructure.
+
+![Figure 06 · My sandbox is ready](/images/blog/pgnexus-postgresql-sandbox/20260910-2098062240268247040_461941.png)
+
+Connecting opens a standard psql terminal with completion. Not sure what to test? The interface also offers AI-generated test cases.
+
+![Figure 08 · AI-generated test cases](/images/blog/pgnexus-postgresql-sandbox/20260910-2098064672654188544_461941.png)
+
+The available forks are even more interesting. Beyond PostgreSQL, **IvorySQL** is offered at version 5 (5.6). I selected 5.6, connected, and ran a version query, which returned PostgreSQL 18.6 (IvorySQL 5.6). It follows the PostgreSQL mainline while adding compatibility features in the fork. Switching from PG 18 to IvorySQL within the same browser tab is convenient for compatibility testing.
+
+![Figure 09 · Launch options include IvorySQL 5 (5.6)](/images/blog/pgnexus-postgresql-sandbox/figure-09.png)
+
+![Figure 10 · IvorySQL 5.6 connection returns PostgreSQL 18.6 (IvorySQL 5.6)](/images/blog/pgnexus-postgresql-sandbox/figure-10.png)
+
+When finished, click Destroy and confirm the prompt. The environment is reclaimed cleanly, like returning a shared power bank.
+
+![Figure 11 · Confirming sandbox destruction](/images/blog/pgnexus-postgresql-sandbox/figure-11.jpg)
+
+## 02 Developer Sandbox: AI Helps Test a Kernel Patch
+
+**The entry barrier to contributing a PG kernel patch is moving from setting up a compiler to operating a workflow.**
+
+Sandbox interfaces come in two forms: **Basic**, exposing the raw shell terminal, and **Experience**, offering a graphical workbench. The basic sandbox connects directly to psql; I tried SELECT 1 FROM dual, a familiar sight for Oracle users.
+
+![Figure 12 · Basic shell and Experience workbench sandbox types](/images/blog/pgnexus-postgresql-sandbox/figure-12.jpg)
+
+![Figure 13 · Direct psql access and SELECT 1 FROM dual in the basic sandbox](/images/blog/pgnexus-postgresql-sandbox/figure-13.jpg)
+
+The interface is the documentation: the Experience workbench brings the workspace, psql, logs, topology, and AI assistant together on one screen (Figures 14 and 15). Logs help you get oriented, while AI tools are available in the toolbar.
+
+![Figures 14 and 15 · Experience sandbox overview: the interface is the documentation](/images/blog/pgnexus-postgresql-sandbox/figure-14.jpg)
+
+![Figure 16 · Inspecting logs](/images/blog/pgnexus-postgresql-sandbox/20260910-2098072356119994368_461941.png)
+
+![Figure 17 · AI tools in the toolbar](/images/blog/pgnexus-postgresql-sandbox/20260910-2098073294331781120_461941.png)
+
+The main attraction is the **Developer Sandbox**, intended for PG kernel development. Patch management supports adding, removing, and reordering patches, with one-click application of community patches and live rebuilding.
+
+![Figure 18 · Starting a developer sandbox](/images/blog/pgnexus-postgresql-sandbox/20260912-2098574445845766144_461941.png)
+
+![Figure 19 · Applying patches and rebuilding](/images/blog/pgnexus-postgresql-sandbox/20260912-2098578362079993856_461941.png)
+
+After I clicked Run Tests, AI executed the validation cases, collected results, and produced a report summary with links to related mailing-list discussions.
+
+![Figure 20 · AI-assisted patch testing](/images/blog/pgnexus-postgresql-sandbox/20260912-2098581013698519040_461941.png)
+
+Submitting a PG patch used to feel like baking bread at home: prepare, wait, bake, and repeat after a failed batch. Here it feels more like handing the dough to a kitchen, watching the process, and tasting the result before signing off. **You still need to understand the diff, but environment setup is less of a barrier.**
+
+## 03 Physical Replication and Benchmarks: Click to Create a Standby
+
+**Standby deployment changes from hand-writing primary_conninfo to a couple of clicks.**
+
+The topology panel offers standalone, physical replication, logical replication, and FDW sharding. I selected physical replication and deployed a standby. Tabs at the top right switch between primary and standby connections for inspection.
+
+![Figure 21 · Deploying a standby](/images/blog/pgnexus-postgresql-sandbox/20260912-2098579154639872000_461941.png)
+
+![Figure 22 · Physical replication ready, primary and standby running](/images/blog/pgnexus-postgresql-sandbox/20260912-2098581834556858368_461941.png)
+
+Once the topology was ready, I ran a benchmark and the platform generated its report.
+
+![Figure 23 · Benchmark completed](/images/blog/pgnexus-postgresql-sandbox/20260912-2098582685359349760_461941.png)
+
+When an error occurred, the AI assistant supplied troubleshooting suggestions rather than only an error code. This resembles my approach to lock waits in LockDetective: **tools provide the clues, while people make the judgment. It delivers the work; I sign off.**
+
+![Figure 24 · AI assistant troubleshooting suggestions](/images/blog/pgnexus-postgresql-sandbox/20260912-2098583760585957376_461941.png)
+
+## 04 Three Things to Know Before Starting
+
+1. **Instances are time-limited.** The countdown showed 26:37, an extension added 30 minutes, and expiration destroys the instance. Plan longer experiments and save important work outside the sandbox.
+2. **This is an experimental environment.** It suits feature validation and testing, but its capacity and settings differ from production. Do not transfer conclusions directly.
+3. **Review AI conclusions yourself.** Reports and troubleshooting suggestions provide direction; the final judgment remains yours.
+
+These are operating conditions, rather than shortcomings.
+
+## Takeaways
+
+- **The shortest route into a new database is to get it running, then read the documentation.**
+- **The platform can handle the environment while developers retain responsibility for kernel-patch judgment.**
+- **AI delivers the report; you sign off after reviewing it.**
+
+Visit [pgnexus.ai](https://pgnexus.ai) and register by email.

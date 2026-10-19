@@ -1,0 +1,363 @@
+---
+slug: "ivorysql-rowid-vacuum-full"
+title: "VACUUM FULL 之后 ROWID 就废了？IvorySQL 兼容性实测"
+date: "2026-10-08"
+author: "qqtq"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-rowid-vacuum-full-zh.png"
+tags: ["Oracle", "Compatibility", "ROWID"]
+description: "实测 IvorySQL 5.4 的 ROWID 伪列、自动索引、定位更新与去重，追踪 VACUUM FULL 等表重写操作导致的标识失效。"
+---
+
+> 作者简介：柒柒天晴，现居乌鲁木齐，数据库从业者。记录分享数据库实践，持续学习。
+
+Oracle 的 rowid 是物理地址：直接指向数据文件、块和行位置，行的物理移动会导致 rowid 变化，`WHERE rowid = ...` 定位更新极快根本原因是它本身就是地址。IvorySQL 5.4 提供了 Oracle 兼容的 `rowid` 伪列和 `WITH ROWID` 表选项，官方设计文档把它定位为 ctid 的"长期行标识"替代方案——文档原话是 ctid"不适合作为一个长期的行标识"，并声称默认会创建 UNIQUE 索引（[RowID 设计文档](https://docs.ivorysql.org/cn/ivorysql-doc/master/compatibility_features_design/rowid)）——但它不是物理地址，是 `(表OID, 行序号)` 的逻辑标识。兼容到什么程度，只有真机跑过才知道：建表后会不会自动建索引，`WHERE rowid = ...` 能不能定位更新，DELETE 后序号复不复用，`MIN(rowid)` 连接去重套路能不能原样迁移，VACUUM FULL 之后 rowid 还算不算数？ 接下来我们一步步验证。
+
+## 环境与软件说明
+
+| 项目 | 值 |
+| --- | --- |
+| 操作系统 | Rocky Linux 9.5 |
+| 数据库版本 | PostgreSQL 18.4 (IvorySQL 5.4) |
+| 源码 | tag `IvorySQL_5.4`（Gitee 官方仓库，MD5 `6491b889178b7a9a4382674837c8fdf8`） |
+| 构建参数 | `./configure --prefix=/opt/ivorysql/5.4 --without-llvm --without-icu --with-uuid=e2fs` |
+| 安装目录 | /opt/ivorysql/5.4 |
+| 监听端口 | 5432(PG协议)、1521(Oracle兼容协议)，同一进程监听双端口 |
+
+> 实例以 `shared_preload_libraries = 'liboracle_parser,ivorysql_ora'` 启动；`ivorysql.default_with_rowids` 默认 `off`。两个兼容模式参数：`database_mode` 是 internal 级（连库即定，本实例为 `oracle`），`compatible_mode` 是 user 级（会话内可切，默认 `pg`）。
+
+## rowid 实测
+
+### WITH ROWID 只在 oracle 兼容模式可解析
+
+```sql
+SHOW ivorysql.compatible_mode;
+
+ ivorysql.compatible_mode
+--------------------------
+ pg
+(1 row)
+
+CREATE TABLE t_rowid (id int primary key, payload text) WITH ROWID;
+
+ERROR:  syntax error at or near "ROWID"
+LINE 1: ...TABLE t_rowid (id int primary key, payload text) WITH ROWID;
+                                                                 ^
+
+SET ivorysql.compatible_mode = oracle;
+CREATE TABLE t_rowid (id int primary key, payload text) WITH ROWID;
+
+CREATE TABLE
+```
+
+**现象**：`database_mode=oracle` 但 `compatible_mode=pg` 时，`WITH ROWID` 直接死在语法层——Oracle 语法挂在 oracle 兼容解析器（`liboracle_parser`）上，不在 PG 原生语法里。会话切到 oracle 模式后同一条语句通过，下面所有验证都在 oracle 模式下进行。
+
+### 建表即建索引：伪列与 _rowid_idx
+
+```sql
+\d t_rowid
+                   Table "public.t_rowid"
+ Column  |      Type       | Collation | Nullable | Default
+---------+-----------------+-----------+----------+---------
+ id      | pg_catalog.int4 |           | not null |
+ payload | text            |           |          |
+Indexes:
+    "t_rowid_pkey" PRIMARY KEY, btree (id)
+    "t_rowid_16385_rowid_idx" btree (rowid)
+```
+
+**现象**：rowid 不是普通列，但 `CREATE TABLE ... WITH ROWID` 建表时就顺手建了 `btree (rowid)` 索引，索引名中间夹着表 OID（16385）。
+
+### rowid 取值：独立类型，(表OID, 行序号)
+
+```sql
+INSERT INTO t_rowid VALUES (1, 'first'), (2, 'second'), (3, 'third');
+SELECT rowid, id, payload FROM t_rowid ORDER BY id;
+
+   rowid   | id | payload
+-----------+----+---------
+ (16385,1) |  1 | first
+ (16385,2) |  2 | second
+ (16385,3) |  3 | third
+(3 rows)
+
+SELECT pg_typeof(rowid) AS rowid_type, length(rowid::text) AS rowid_len FROM t_rowid LIMIT 1;
+
+ rowid_type | rowid_len
+------------+-----------
+ rowid      |         9
+(1 row)
+```
+
+**现象**：rowid 是独立类型，值形如 `(16385,1)` 共 9 字符：第一段是表 OID，第二段是表内行序号，从 1 递增。它跟 PG 的 `ctid`（物理位置 `(0,1)`）不是一回事。
+
+### 定位更新与 DELETE 重插
+
+```sql
+SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 't_rowid';
+
+        indexname        |                                  indexdef
+-------------------------+----------------------------------------------------------------------------
+ t_rowid_16385_rowid_idx | CREATE INDEX t_rowid_16385_rowid_idx ON public.t_rowid USING btree (rowid)
+ t_rowid_pkey            | CREATE UNIQUE INDEX t_rowid_pkey ON public.t_rowid USING btree (id)
+(2 rows)
+
+UPDATE t_rowid SET payload = payload || '_updated' WHERE rowid = (SELECT rowid FROM t_rowid WHERE id = 2) RETURNING rowid, id, payload;
+
+   rowid   | id |    payload
+-----------+----+----------------
+ (16385,2) |  2 | second_updated
+(1 row)
+```
+
+**现象**：rowid 索引是普通 btree、非唯一——这与开头引用的设计文档"默认创建 UNIQUE 索引"的表述不符，矛盾点连同 VACUUM FULL 退化一起报告在 issue #2151；`WHERE rowid = ...` 定位更新和 `RETURNING rowid` 原样可用。
+
+```sql
+DELETE FROM t_rowid WHERE id = 3;
+INSERT INTO t_rowid VALUES (3, 'third_again');
+SELECT ctid, rowid, id, payload FROM t_rowid ORDER BY id;
+
+ ctid  |   rowid   | id |    payload
+-------+-----------+----+----------------
+ (0,1) | (16385,1) |  1 | first
+ (0,4) | (16385,2) |  2 | second_updated
+ (0,5) | (16385,4) |  3 | third_again
+(3 rows)
+```
+
+**现象**：id=3 删除后重插，新行拿到 `(16385,4)` 而不是旧的 `(16385,3)`——序号由表级分配器发出、删除不回收，物理位置 `(0,5)` 也和序号 4 对不上。Oracle 里"删除后新行可能复用旧 rowid"的代码在 IvorySQL 上必然失效；反过来看，缓存 rowid 做定位的代码反而更安全。
+
+### VACUUM FULL：rowid 整体作废
+
+```sql
+CREATE TABLE t_vac (id int primary key, v text) WITH ROWID;
+INSERT INTO t_vac VALUES (1,'a'),(2,'b'),(3,'c'),(4,'d'),(5,'e');
+SELECT rowid, id, v FROM t_vac ORDER BY id;
+
+   rowid   | id | v
+-----------+----+---
+ (16395,1) |  1 | a
+ (16395,2) |  2 | b
+ (16395,3) |  3 | c
+ (16395,4) |  4 | d
+ (16395,5) |  5 | e
+(5 rows)
+
+VACUUM FULL t_vac;
+SELECT rowid, id, v FROM t_vac ORDER BY id;
+
+   rowid   | id | v
+-----------+----+---
+ (16395,0) |  1 | a
+ (16395,0) |  2 | b
+ (16395,0) |  3 | c
+ (16395,0) |  4 | d
+ (16395,0) |  5 | e
+(5 rows)
+
+SELECT count(*) FROM t_vac WHERE rowid = '(16395,1)';
+
+ count
+-------
+     0
+(1 row)
+
+SELECT count(*) FROM t_vac WHERE rowid = '(16395,0)';
+
+ count
+-------
+     5
+(1 row)
+```
+
+**现象**：VACUUM FULL 重写表后，五行 rowid 全部变成 `(16395,0)`，按重写前的旧值 `(16395,1)` 定位返回 0 行，按 `(16395,0)` 命中全部 5 行。rowid 只在表未被重写的生命周期内有效（源码原因见「源码定位」）。缓存 rowid 做二次定位的应用，必须把 VACUUM FULL / CLUSTER / 表结构重写型 ALTER 当作失效事件处理。该行为已向 IvorySQL 官方报告（issue [#2151](https://github.com/IvorySQL/IvorySQL/issues/2151)），并与官方在途修复的同类问题 #2004 / #2037 相互印证。
+
+### ALTER 补开 rowid：能查不能索引
+
+```sql
+CREATE TABLE t_alter (id int primary key, memo text);
+ALTER TABLE t_alter SET WITH ROWID;
+INSERT INTO t_alter VALUES (1, 'x'), (2, 'y');
+SELECT rowid, id, memo FROM t_alter ORDER BY id;
+
+   rowid   | id | memo
+-----------+----+------
+ (16411,1) |  1 | x
+ (16411,2) |  2 | y
+(2 rows)
+
+SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 't_alter';
+
+  indexname   |                              indexdef
+--------------+---------------------------------------------------------------------
+ t_alter_pkey | CREATE UNIQUE INDEX t_alter_pkey ON public.t_alter USING btree (id)
+(1 row)
+```
+
+**现象**：`ALTER TABLE ... SET WITH ROWID` 能补出伪列，但不补建索引——`CREATE ... WITH ROWID` 会顺手建索引，ALTER 路径没有这段逻辑。
+
+```sql
+EXPLAIN (COSTS OFF) SELECT * FROM t_vac WHERE rowid = '(16395,1)';
+
+               QUERY PLAN
+----------------------------------------
+ Seq Scan on t_vac
+   Filter: (rowid = '(16395,1)'::rowid)
+(2 rows)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM t_vac WHERE rowid = '(16395,1)';
+
+                   QUERY PLAN
+-------------------------------------------------
+ Index Scan using t_vac_16395_rowid_idx on t_vac
+   Index Cond: (rowid = '(16395,1)'::rowid)
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM t_alter WHERE rowid = '(16395,1)';
+
+               QUERY PLAN
+----------------------------------------
+ Seq Scan on t_alter
+   Disabled: true
+   Filter: (rowid = '(16395,1)'::rowid)
+(3 rows)
+```
+
+**现象**：5 行的小表默认走 Seq Scan 是优化器的正常选择；关掉顺序扫描后，有索引的 `t_vac` 能切到 `t_vac_16395_rowid_idx` 走 Index Scan，而 `t_alter` 没有任何可用的 rowid 索引，只能全表扫。第三段计划里的 `Disabled: true` 是 PostgreSQL 18 的新标记：Seq Scan 已被 `enable_seqscan = off` 禁用，但 `t_alter` 上不存在任何索引、别无他路，优化器只能带病使用——恰好从反面印证了"没有索引可用"。ALTER 补开的表要手工 `CREATE INDEX ... ON t (rowid)`。
+
+### default_with_rowids：把 rowid 变成默认行为
+
+```sql
+SET ivorysql.default_with_rowids = on;
+CREATE TABLE t_def (id int primary key, v text);
+INSERT INTO t_def VALUES (1, 'a');
+SELECT rowid, id, v FROM t_def;
+
+   rowid   | id | v
+-----------+----+---
+ (16427,1) |  1 | a
+(1 row)
+
+SELECT indexname FROM pg_indexes WHERE tablename = 't_def';
+
+       indexname
+-----------------------
+ t_def_16427_rowid_idx
+ t_def_pkey
+(2 rows)
+```
+
+**现象**：GUC 设为 on 后，普通建表不写 `WITH ROWID` 也会自动带伪列和自动索引。适合迁移期整体开启；代价是每张新表多一个索引、写入路径多一次序号分配。验证完 `RESET` 恢复默认值。
+
+### 普通表在 oracle 模式也没有 rowid
+
+```sql
+CREATE TABLE t_plain (id int primary key, v text);
+INSERT INTO t_plain VALUES (1, 'a');
+SELECT rowid, id, v FROM t_plain;
+
+ERROR:  "rowid": invalid identifier
+LINE 1: SELECT rowid, id, v FROM t_plain;
+               ^
+```
+
+**现象**：rowid 是表选项带来的，不是会话模式的副作用——即使切到 oracle 模式，普通表也不会凭空长出伪列。迁移原库里到处 `SELECT rowid` 的脚本时，只有 `WITH ROWID` 表或 `default_with_rowids=on` 下建的表能跑。
+
+### MIN(rowid) 去重：Oracle 惯用法原样可用
+
+```sql
+CREATE TABLE t_dup (id int, city text) WITH ROWID;
+INSERT INTO t_dup VALUES (1, 'beijing'), (1, 'beijing'), (2, 'shanghai'), (2, 'beijing');
+SELECT id, city FROM t_dup WHERE rowid IN (SELECT MIN(rowid) FROM t_dup GROUP BY id, city) ORDER BY id, city;
+
+ id |   city
+----+----------
+  1 | beijing
+  2 | beijing
+  2 | shanghai
+(3 rows)
+```
+
+**现象**：按 `(id, city)` 分组取 `MIN(rowid)`，重复的 `(1, beijing)` 只留一行，Oracle 里最常用的 rowid 去重套路不改写就能迁移。
+
+### 表内唯一性：5000 行验证
+
+```sql
+CREATE TABLE t_big (id int primary key, v text) WITH ROWID;
+INSERT INTO t_big SELECT g, md5(g::text) FROM generate_series(1,5000) g;
+SELECT count(*), count(DISTINCT rowid) FROM t_big;
+
+ count | count
+-------+-------
+  5000 |  5000
+(1 row)
+```
+
+**现象**：表内 5000 个 rowid 无重复；第二段序号由表级序列分配、每表从 1 起，跨表不唯一的是序号段，但完整 rowid 值含表 OID，同一库内跨表天然不冲突，直接存 rowid 值即自带表维度。要注意的是：OID 只在库内唯一，跨库汇总需额外带库标识；pg_dump/restore 重建表会换新 OID，跨表引用 rowid 的应用要按失效事件处理。
+
+## 源码定位
+
+三个关键事实都能在源码里对上号（源码树为 tag `IvorySQL_5.4`，下载自 Gitee 官方仓库；行号在后续版本可能漂移，请以文件+符号名为准）。第一，rowid 是系统伪列，定义在 `src/backend/catalog/heap.c` 的 `SysAtt[]` 数组（`ROWIDOID`，属性号 `RowIdAttributeNumber`）：
+
+```bash
+[root@node1 ~]# sed -n '229,247p' /tmp/IvorySQL-IvorySQL_5.4/src/backend/catalog/heap.c
+static const FormData_pg_attribute a7 = {
+   .attname = {"rowid"},
+   .atttypid = ROWIDOID,
+   .attlen = -1,
+   .attnum = RowIdAttributeNumber,
+   .atttypmod = -1,
+   .attbyval = false,
+   .attalign = TYPALIGN_SHORT,
+   .attstorage = TYPSTORAGE_PLAIN,
+   .attnotnull = true,
+   .attislocal = true,
+};
+```
+
+第二，取值在 `src/backend/access/common/heaptuple.c` 的 `RowIdAttributeNumber` 分支组装：`values[0]` 是表 OID，`values[1]` 是行头里记录的序号；序号存在行头固定区域，由 `HEAP_HASROWID` 信息位标记是否有值：
+
+```bash
+[root@node1 ~]# sed -n '593,608p' /tmp/IvorySQL-IvorySQL_5.4/src/include/access/htup_details.h
+#define HeapTupleHeaderGetRowId(tup) \
+( \
+	((tup)->t_infomask & HEAP_HASROWID) ? \
+		*((int64 *) ((char *)(tup) + (tup)->t_hoff - sizeof(int64))) \
+	: \
+		-1	\
+)
+```
+
+第三，序号来自表级序列 `relation->rd_rowdSeqid`，插入路径（`heap_prepare_insert`）在 `heapam.c` 里 `HeapTupleSetRowId(tup, seqnum)` 写入——这解释了 DELETE 后重插序号为什么不回退。而 VACUUM FULL 走 `rewriteheap.c` 的元组重写路径（入口函数 `rewrite_heap()`），该文件没有任何 rowid 相关代码（计数为 0），重写后的元组读不到原序号，最终输出 `(oid,0)`，与实测完全对应：
+
+```bash
+[root@node1 ~]# echo "rewriteheap.c 中 rowid 出现次数: $(grep -c -i 'rowid' /tmp/IvorySQL-IvorySQL_5.4/src/backend/access/heap/rewriteheap.c)"
+rewriteheap.c 中 rowid 出现次数: 0
+[root@node1 ~]# grep -n 'HeapTupleSetRowId\|rd_rowdSeqid' /tmp/IvorySQL-IvorySQL_5.4/src/backend/access/heap/heapam.c | head -8
+2214:	if (relation->rd_rel->relhasrowid && OidIsValid(relation->rd_rowdSeqid))
+2221:		seqnum = nextval_internal(relation->rd_rowdSeqid, true);
+2223:		HeapTupleSetRowId(tup, seqnum);
+3340:		HeapTupleSetRowId(newtup, HeapTupleGetRowId(&oldtup));
+```
+
+自动索引的创建在 `src/backend/commands/tablecmds.c` 的 `Build a default types index on rowid column` 注释下方：建表流程判断 `relhasrowid` 为真且是普通表（非分区）就补建 btree 索引，索引名由 `ChooseRelationName(relname, "<oid>_rowid", "idx")` 生成——`t_rowid_16385_rowid_idx` 的命名就是这么来的。ALTER 路径没有这段逻辑，所以 `SET WITH ROWID` 不建索引。
+
+## 迁移要核对的点
+
+1. **会话模式**：所有 rowid 语法和功能依赖 `compatible_mode=oracle`；连接池场景建议建连后统一 `SET`，不要依赖会话默认值。
+2. **rowid 有效期**：VACUUM FULL / CLUSTER 会让既有 rowid 整体作废（全部变成 `(oid,0)`）；表结构重写型 ALTER 会把 rowid 重新分配为新序号（实测 `(oid,3)`、`(oid,4)`），旧值同样定位不到。缓存 rowid 做定位的应用要把这类操作当失效事件处理，必要时重建定位缓存。
+3. **ALTER 补开要手工补索引**：`SET WITH ROWID` 只给伪列不给索引，`WHERE rowid = ...` 只能全表扫。
+4. **可直接迁移的写法**：`WHERE rowid = ...` 定位更新、`RETURNING rowid`、`MIN(rowid)` 分组去重，原样可用。
+5. **普通表无伪列**：迁移 `SELECT rowid` 前，先确认目标表带 rowid 选项，或迁移期开启 `ivorysql.default_with_rowids`。
+6. **端口说明**：5432、1521 双端口监听是 IvorySQL 正常设计，1521 为 Oracle 兼容端口，按需放行防火墙。
+
+## 总结
+
+IvorySQL 的 rowid 是一个"形似神不似"的兼容特性：语法、惯用法和常用套路能原样迁移，可迁移清单和工程注意事项都在上一节，这里只留两个必须建立的认知。
+
+第一，rowid 是 `(表OID, 行序号)` 的逻辑标识，不是物理地址，序号由表级序列分配、只增不减。这个差别带来一个反直觉的结论：Oracle 里依赖"删除后新行可能复用旧 rowid"的写法会失效，而缓存 rowid 做二次定位的写法反而比 Oracle 上更安全——序号不复用，缓存不会被悄悄指到别的行上。
+
+第二，标题里的"ROWID 就废了"不是危言耸听，而是源码可证的确定性行为：VACUUM FULL / CLUSTER 这类重写会让全部行变成 `(oid,0)`，旧值一个都定位不到；重写型 ALTER 则给行重新分配新序号，旧值同样失效。应对方式不复杂——凡是应用侧缓存了 rowid，就把这类操作登记成失效事件、必要时重建缓存。
+
+一句话：IvorySQL 的 rowid 可以放心用于"会话内即时定位"和"惯用去重套路"，但绝不能像 Oracle 那样当作跨生命周期的稳定行地址使用。

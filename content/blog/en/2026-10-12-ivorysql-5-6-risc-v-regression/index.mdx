@@ -1,0 +1,475 @@
+---
+slug: "ivorysql-5-6-risc-v-regression"
+title: "IvorySQL 5.6 on RISC-V: Zero-Patch Build, All 468 Regression Tests Passed"
+date: "2026-10-12"
+author: "Shi Jiawei"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-5-6-risc-v-regression-en.png"
+tags: ["RISC-V", "Regression Testing", "Oracle"]
+description: "A zero-patch IvorySQL 5.6 build on SG2042 passes 231 PostgreSQL and 237 Oracle regression tests, with deployment and compatibility findings."
+---
+
+> About the author: Shi Jiawei has 12 years of database experience and is an Oracle ACE Pro and PostgreSQL ACE, with OCM/PGCM/KCM certifications. He serves on the IvorySQL Expert Advisory Committee, is a KVA, Yashan YVP and KWDB MVP, advises the PolarDB open-source community and HaloDB, evangelizes for the TiDB community, and advises the MOP technical community. WeChat publication: Digital Observer.
+
+## No riscv64 Binary in the Official Packages
+
+IvorySQL 5.6 was released on September 18, 2026, tracking PostgreSQL 18.6. The official release's binary packages are:
+
+```
+IvorySQL-5.6-74c405c-20260914.aarch64.rpm
+IvorySQL-5.6-74c405c-20260914.arm64.deb
+IvorySQL-5.6-74c405c-20260917.amd64.deb
+IvorySQL-5.6-74c405c-20260917.x86_64.rpm
+```
+
+Four packages, two formats each for x86_64 and ARM64. No riscv64 package.
+
+On RISC-V, using IvorySQL 5.6 therefore requires a source build.
+
+“Can it compile?” and “Does the compiled program behave correctly?” are different questions. Many architecture-porting reports stop after compilation, connection, and one SELECT. That only proves the compiler accepted the code. Floating-point formatting, memory alignment, and byte order can still fail; a full regression run is needed to catch such issues.
+
+The goal here was specific: run both regression suites and then establish the boundaries of Oracle compatibility.
+
+## Test Environment
+
+| Item | Configuration |
+| --- | --- |
+| SoC | Dual-socket SOPHGO SG2042 |
+| CPU | 128 cores, 8 NUMA nodes |
+| CPU core | T-Head Xuantie C920, 2 GHz |
+| ISA | rv64imafdc_zicntr_zicsr_zifencei_zihpm_xtheadvector |
+| Memory | 250 GB |
+| Storage | 894 GB NVMe SSD |
+| OS | openEuler 24.03 LTS |
+| Kernel | 6.6.127-0.0.0.0.riscv64 |
+| Compiler | GCC 12.3.1 |
+
+With 128 cores, 250 GB of RAM, and NVMe, this is comparable in scale to mainstream x86 servers. A RISC-V server is no longer necessarily a small development board.
+
+I fell into that assumption myself, as the build section explains.
+
+One potentially confusing detail: dmidecode identifies SOPHGO and SG2042, while /proc/cpuinfo reports mvendorid 0x5b7 (T-Head), and the ISA includes T-Head's proprietary xtheadvector extension.
+
+There is no contradiction. SOPHGO produces the SG2042 chip, which uses T-Head's Xuantie C920 CPU cores. Chip vendor and core designer are different roles; mvendorid identifies the latter. RISC-V separates IP licensing and chip design in a way similar to ARM.
+
+## Build Results: No Architecture Patches
+
+### Fetching the Source
+
+```bash
+git clone --depth 1 --branch IvorySQL_5.6 \
+    https://github.com/IvorySQL/IvorySQL.git ivorysql-5.6
+cd ivorysql-5.6 && git log -1 --format="%H"
+# 74c405c9c355a8167322b3749bbc1b982a0eb0c0
+```
+
+Commit 74c405c exactly matches the hash in the official release package names. The source compiled here is the same commit used for the official x86/ARM binaries.
+
+That makes architecture, rather than source-version drift, the variable in subsequent comparisons. It is an inexpensive cross-check to do first.
+
+### Dependencies and configure
+
+Install the dependencies on openEuler:
+
+```bash
+dnf install -y gcc gcc-c++ make bison flex perl perl-ExtUtils-Embed \
+    readline-devel zlib-devel openssl-devel libicu-devel \
+    libxml2-devel libxslt-devel libuuid-devel e2fsprogs-devel \
+    systemd-devel python3-devel tcl-devel git wget
+```
+
+configure options:
+
+```bash
+./configure --prefix=/opt/ivorysql5.6 \
+    --with-uuid=e2fs --with-libxml --with-libxslt \
+    --with-icu --with-openssl --with-readline --with-systemd \
+    --without-llvm
+```
+
+Two choices deserve explanation.
+
+I omitted --enable-cassert. The official README's --enable-debug --enable-cassert example targets development and debugging. The author notes a three-to-fivefold runtime slowdown from assertions; including them would make later performance observations unsuitable as a normal-build reference. Omit them for this test configuration.
+
+I added --without-llvm. LLVM JIT support on RISC-V is less established than on x86/ARM; excluding it keeps the first validation focused. JIT can be tested separately after the base build works. Introduce one variable at a time to keep failures traceable.
+
+Both configure and make passed on the first attempt, without patches.
+
+The standard configure, make, and make install workflow completed with no errors in the build log. Although no official riscv64 package is provided, this source build encountered no architecture-related obstacle.
+
+### Three Revealing Lines in configure Output
+
+A smooth build still yields useful evidence. The configure probes reveal substantive differences from x86/ARM.
+
+**First: CRC-32C falls back to software.**
+
+```
+checking for _mm_crc32_u8 and _mm_crc32_u32... no
+checking for __crc32cb, __crc32ch, __crc32cw, and __crc32cd... no
+checking for __builtin_loongarch_crcc_w_b_w, ... no
+checking which CRC-32C implementation to use... slicing-by-8
+```
+
+PostgreSQL 18 probes four hardware paths: x86 SSE4.2, ARMv8 CRC extensions, ARMv8 with SIMD, and LoongArch-specific built-ins. None matched, so it selected the slicing-by-8 lookup-table implementation.
+
+The enabled instruction set provides direct evidence for the absence of a CRC hardware path in this build:
+
+```
+-march=rv64imafdc_zicsr_zifencei -mabi=lp64d
+```
+
+The string contains rv64i base integers, m multiplication/division, a atomics, f/d floating point, and c compressed instructions. It contains no CRC extension or B extension. Zbc carry-less multiplication could accelerate CRC, but PG does not use that route here.
+
+PostgreSQL checksums every WAL record with CRC-32C before writing it, so it is natural to expect some extra cost on write-heavy RISC-V workloads.
+
+The direction of that inference is reasonable, but the measured magnitude is small. perf attributed only 0.14% CPU to pg_comp_crc32c_sb8, versus 1.48% for the SQL parser base_yyparse—about ten times as much for parsing.
+
+WAL records are relatively small, and CRC computation is a small part of the transaction path beside parsing, planning, locking, and buffer management. An instruction-set gap and its practical weight are different things.
+
+**Second: dummy.s is easy to misread.**
+
+```
+config.status: linking src/backend/port/tas/dummy.s to src/backend/port/tas.s
+```
+
+RISC-V uses dummy.s instead of handwritten test-and-set assembly. It is tempting to interpret this as unoptimized spinlocks and questionable performance.
+
+The preceding probe results show why that inference is wrong:
+
+```
+checking for builtin __sync int32/int64 atomic operations... yes
+checking for builtin __atomic int32/int64 atomic operations... yes
+```
+
+GCC's atomic built-ins are available. In this case, PG's s_lock.h uses __sync_lock_test_and_set. With the a extension enabled, GCC compiles it to the RISC-V amoswap instruction: a real hardware atomic operation.
+
+dummy.s means no handwritten architecture-specific assembly, not missing hardware support. CRC-32C lacks the selected hardware path; spinlocks have hardware instructions reached through compiler built-ins. These are different cases.
+
+**Third: IvorySQL's own code follows this path too.**
+
+```
+config.status: linking src/interfaces/libpq/posix_ivysema.c
+               to src/interfaces/libpq/ivy_sema.c
+```
+
+Native PG does not have this line: IvorySQL adds its own semaphore implementation in libpq. Vendor-specific code can be a porting trouble spot; here it successfully selected the POSIX semaphore path.
+
+### Build Parallelism and Machine Size
+
+For the first build I used -j2, following the assumption that RISC-V machines have little memory and need 1.5 GB per parallel job:
+
+| Stage | Parallel option | Wall time | user | sys | Effective parallelism |
+| --- | --- | --- | --- | --- | --- |
+| Core backend | -j2 | 23m06s | 35m54s | 6m32s | 1.84 |
+| contrib | -j128 | 33.5s | 4m50s | 10m50s | 28.03 |
+
+Effective parallelism is calculated as (user + sys) ÷ real.
+
+Those 23 minutes used only about 1.4% of the machine's nominal CPU capacity, and memory use stayed below 4 GB throughout.
+
+Treating this server like an embedded board undersizes the build. Inspect nproc and free -h before choosing parallelism.
+
+During contrib, sys time was 2.24 times user time. Dozens of small modules each fork gcc, create directories, and install files, producing concentrated process and filesystem overhead at high parallelism. This also explains why -j128 achieved parallelism of 28: the module count and dependency graph could not fill all 128 cores.
+
+### Verifying the Artifacts
+
+```bash
+$ file /opt/ivorysql5.6/bin/postgres
+ELF 64-bit LSB executable, UCB RISC-V, RVC, double-float ABI,
+dynamically linked, interpreter /lib/ld-linux-riscv64-lp64d.so.1
+```
+
+RVC corresponds to c in -march; the double-float ABI and lp64d dynamic loader correspond to -mabi=lp64d. This was a native RISC-V build, not cross-compilation.
+
+The output included all 37 binaries and 52 extension control files.
+
+## Both Regression Suites Passed: 468 Tests
+
+Compilation is only the start. Regression results determine whether the port can be considered functionally usable.
+
+IvorySQL maintains two parallel test systems. src/test/regress contains native PostgreSQL tests, run through make check; src/oracle_test/regress contains Oracle-mode tests, run through make oracle-check.
+
+Their subdirectory structures align—authentication, isolation, recovery, subscription, ssl, icu, and more. These are two test systems, rather than a few extra cases. The top-level GNUmakefile explicitly combines them with `all-check: check oracle-check`.
+
+### Results
+
+| Suite | Target | Tests | Result | Time |
+| --- | --- | --- | --- | --- |
+| src/test/regress | make check | 231 | All passed | 3m18.8s |
+| src/oracle_test/regress | make oracle-check | 237 | All passed | 6m01.4s |
+| Total | | 468 | Zero failures | About 9m20s |
+
+```
+# All 231 tests passed.
+# All 237 tests passed.
+```
+
+No regression.diffs file was produced.
+
+### What the Two Suites Cover
+
+Running only make check supports a conclusion about PostgreSQL 18.6 behavior on RISC-V, because those 231 tests are native PG cases.
+
+IvorySQL's Oracle compatibility includes a separate implementation integrated into the backend:
+
+```
+src/backend/oracle_parser     Independent Oracle syntax parser
+src/oracle_fe_utils           Oracle branch of frontend utilities
+contrib/ivorysql_ora          Core Oracle compatibility extension
+contrib/ora_btree_gist        Index support for Oracle data types
+contrib/ora_btree_gin
+src/interfaces/libpq/ivytest  Tests for the custom libpq implementation
+```
+
+The author distinguishes this code from the native PG test coverage. Passing all 237 Oracle cases provides evidence for IvorySQL's own compatibility implementation on RISC-V too.
+
+For example, ora_force_view tests Oracle's force-view feature. That exercises compatibility semantics rather than merely renaming a PG test.
+
+### Porting Result
+
+On this RISC-V server, IvorySQL 5.6 passed functional validation without architecture patches. Floating-point formatting, time handling, compression, partitioning, and indexing tests all passed.
+
+The CRC-32C hardware gap affects the performance path, not functional correctness. Discussions sometimes conflate an immature ecosystem with incorrect execution; these results do not support the latter claim for this test.
+
+## Distinguish the Two Deployment Ports
+
+After the functional tests passed, deployment exposed two practical traps.
+
+### Two Ports, Two SQL Parsers
+
+Initialize and start the database, then try Oracle syntax:
+
+```sql
+-- Connect to 5432 (port in postgresql.conf)
+create table t_ora(id number(10), name varchar2(50));
+ERROR:  type "number" does not exist
+
+select sysdate from dual;
+ERROR:  relation "dual" does not exist
+```
+
+The number type and dual relation are missing. On the PG port, this behaves as standard PostgreSQL.
+
+Try the same statements on the other port:
+
+```sql
+-- Connect to 1521 (ivorysql.port in ivorysql.conf)
+select 1 from dual;
+ ?column?
+----------
+        1
+
+show port;
+ port
+------
+ 5432
+```
+
+They run normally. Note that SHOW port still returns 5432 when connected to 1521. Both ports lead to the same instance, configuration, and data.
+
+This matches the source structure. liboracle_parser is preloaded through shared_preload_libraries, and the incoming port determines the session parser. Sessions entering on 1521 use the Oracle parser and recognize NUMBER, VARCHAR2, and DUAL; sessions on 5432 use the native PG parser.
+
+One database instance serves two SQL dialects through port routing.
+
+This is an easy migration trap, and its error messages can mislead troubleshooting.
+
+Imagine an Oracle migration team whose operators configure 5432 out of habit. Developers run Oracle SQL and see `type "number" does not exist`. They may investigate missing extensions, an unloaded ivorysql_ora, or even a faulty build.
+
+The actual issue is simply the port used for the connection.
+
+Deployment documentation should state two things: Oracle-compatible SQL connects to ivorysql.port, default 1521, rather than port, default 5432; and both ports share the same data. Existing Oracle-style applications can use 1521, while new PG-style applications use 5432.
+
+### Where Is ivorysql.port Configured?
+
+The next trap appears with multiple instances on one machine. Changing port to 5433 still leaves startup failing because 1521 is also occupied.
+
+The initial search hits a dead end:
+
+```bash
+$ grep -i port /opt/ivorysql5.6/data/postgresql.conf
+64:#port = 5432    # (change requires restart)
+```
+
+postgresql.conf contains only the PG port parameter, with no 1521 setting. The logs did not point me to it either.
+
+I finally found it in the source:
+
+```
+src/backend/utils/misc/ivy_guc.c:240:            1521, 1, 65535,
+src/backend/utils/misc/ivorysql.conf.sample:11:  #ivorysql.port = 1521
+```
+
+The parameter is ivorysql.port, but it lives in the separate ivorysql.conf file.
+
+IvorySQL keeps native PG settings in postgresql.conf and extension settings in ivorysql.conf. If this convention is missing from deployment documentation, port troubleshooting can require reading the source.
+
+The relevant ivorysql.conf content is:
+
+```
+#ivorysql.listen_addresses = 'localhost'   # Oracle-mode listen address
+#ivorysql.port = 1521                      # (change requires restart)
+
+ivorysql.enable_emptystring_to_NULL = 'on'
+shared_preload_libraries = 'gb18030_2022, liboracle_parser, ivorysql_ora'
+#ivorysql.identifier_case_switch = interchange   # normal/interchange/lowercase
+```
+
+The listener settings are symmetrical:
+
+| Mode | Listen address | Port | Configuration file |
+| --- | --- | --- | --- |
+| PostgreSQL | listen_addresses | port | postgresql.conf |
+| Oracle | ivorysql.listen_addresses | ivorysql.port | ivorysql.conf |
+
+A small detail confirms the design: the listen_addresses comment in postgresql.conf now refers to “Postgres mode,” a qualification absent from native PG.
+
+A commented-out ivorysql.port still listens on 1521 because the GUC default applies. To change it, uncomment the setting; editing a commented line has no effect.
+
+## Oracle Compatibility Boundaries
+
+After the port worked, I tested Oracle features. These observations were the same on x86 and are product-level migration considerations rather than architecture-specific issues.
+
+### Verified Oracle-Compatible Features
+
+```sql
+create table t_ora(id number(10), name varchar2(50), created date);
+insert into t_ora values(1, 'RISC-V', sysdate);
+insert into t_ora values(2, '', sysdate);
+
+select id, name, nvl(name,'IS_NULL') as nvl_test,
+       to_char(created,'YYYY-MM-DD HH24:MI:SS') from t_ora;
+ id |  name  | nvl_test |     to_char
+----+--------+----------+---------------------
+ 1  | RISC-V | RISC-V   | 2026-09-20 23:48:02
+ 2  |        | IS_NULL  | 2026-09-20 23:48:02
+```
+
+The second row inserts an empty string, and NVL returns IS_NULL, showing that it was treated as NULL.
+
+This corresponds to ivorysql.enable_emptystring_to_NULL=on in this configuration. Empty strings and NULL differ in native PG, so this semantic alignment matters to application migration. The enabled configuration matches the intended Oracle behavior.
+
+PACKAGE also passed:
+
+```sql
+create or replace package pkg_test as
+  function add_one(n number) return number;
+  procedure say_hello(name varchar2);
+end;
+/
+create or replace package body pkg_test as
+  function add_one(n number) return number as
+  begin
+    return n + 1;
+  end;
+  procedure say_hello(name varchar2) as
+  begin
+    raise notice 'hello %', name;
+  end;
+end;
+/
+
+select pkg_test.add_one(41) from dual;
+ add_one
+---------
+      42
+
+call pkg_test.say_hello('RISC-V');
+NOTICE:  hello RISC-V
+```
+
+Separate package declarations and bodies, functions, procedures, and the slash terminator all worked.
+
+This is significant for migration. Native PostgreSQL has no package concept, while Oracle systems often encapsulate substantial business logic in packages. Package support can avoid a large rewrite.
+
+### Oracle Features Missing in This Test
+
+```sql
+select id, rownum from t_ora where rownum <= 2;
+ERROR:  "rownum": invalid identifier
+
+select table_name from user_tables;
+ERROR:  relation "user_tables" does not exist
+
+select level from dual connect by level <= 3;
+ERROR:  syntax error at or near "by"
+```
+
+Three gaps appeared: the ROWNUM pseudocolumn, data dictionary views such as user_tables, and CONNECT BY hierarchical queries.
+
+The wording suggests two kinds of gaps. ROWNUM produces the Oracle-style “invalid identifier” error, corresponding to ORA-00904: the Oracle parser is active, but the tested pseudocolumn is unavailable. CONNECT BY produces a syntax error, indicating the grammar does not recognize that structure in this test.
+
+Their rewrite costs differ. ROWNUM may be replaced with LIMIT or window functions; CONNECT BY requires restructuring with WITH RECURSIVE. Classifying migration work this way is useful.
+
+### Identifier Case
+
+```sql
+select CaseTest from (select 1 as CaseTest from dual) x;
+ casetest
+----------
+        1
+```
+
+The mixed-case identifier CaseTest appears as a lowercase output column name.
+
+ivorysql.identifier_case_switch defaults to interchange. In the tested configuration, unquoted identifiers follow PG's lowercase behavior rather than Oracle's uppercase behavior.
+
+Oracle would return CASETEST for SELECT CaseTest. Applications retrieving fields by uppercase name can therefore fail under this default. The parameter also accepts normal and lowercase; choose a setting based on application behavior before migration.
+
+## Conclusions
+
+These conclusions come from this SG2042 server. Different hardware or kernels require fresh validation.
+
+It builds: standard configure, make, and make install completed without patches or build-log errors. No official riscv64 binary exists in the referenced release, but the source build encountered no architecture obstacle.
+
+It passes the tests: all 468 regression cases succeeded—231 native PG and 237 Oracle-compatible—with no regression.diffs.
+
+Oracle compatibility is usable within the tested boundaries. PACKAGE, Oracle data types, DUAL, NVL, DECODE, and empty-string conversion passed; ROWNUM, dictionary views, and CONNECT BY showed gaps. The author observed the same three gaps on x86, identifying them as product behavior rather than architecture effects.
+
+The software CRC-32C routine used only 0.14% CPU in the measured workload, while SQL parsing cost about ten times as much. The hardware gap exists, but its weight in this workload is small.
+
+IvorySQL 5.6 has passed the initial question of whether it can run correctly on this RISC-V server.
+
+## Full Reproduction Steps
+
+```bash
+# 1. Dependencies
+dnf install -y gcc gcc-c++ make bison flex perl perl-ExtUtils-Embed \
+    readline-devel zlib-devel openssl-devel libicu-devel \
+    libxml2-devel libxslt-devel libuuid-devel e2fsprogs-devel \
+    systemd-devel python3-devel tcl-devel git wget
+
+# 2. Source
+useradd -m ivorysql && su - ivorysql
+git clone --depth 1 --branch IvorySQL_5.6 \
+    https://github.com/IvorySQL/IvorySQL.git ivorysql-5.6
+cd ivorysql-5.6
+
+# 3. Build (choose parallelism using nproc)
+./configure --prefix=/opt/ivorysql5.6 \
+    --with-uuid=e2fs --with-libxml --with-libxslt \
+    --with-icu --with-openssl --with-readline --with-systemd \
+    --without-llvm
+make -j$(nproc)
+make install && make -j$(nproc) -C contrib install
+
+# 4. Regression tests (run both suites)
+make check           # Native PG, 231 tests
+make oracle-check    # Oracle compatibility, 237 tests
+
+# 5. Initialize and start
+/opt/ivorysql5.6/bin/initdb -D /opt/ivorysql5.6/data \
+    -E UTF8 --locale=C -m oracle
+/opt/ivorysql5.6/bin/pg_ctl -D /opt/ivorysql5.6/data \
+    -l /opt/ivorysql5.6/data/logfile start
+
+# 6. Verify (note the two ports)
+psql -p 5432 -c "select version();"         # PG mode
+psql -p 1521 -c "select sysdate from dual;" # Oracle mode
+```
+
+For multiple instances on one host, change ports in both configuration files:
+
+```
+postgresql.conf:  port = 5433
+ivorysql.conf:    ivorysql.port = 1522
+```

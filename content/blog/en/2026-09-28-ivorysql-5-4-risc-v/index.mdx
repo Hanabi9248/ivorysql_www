@@ -1,0 +1,310 @@
+---
+slug: "ivorysql-5-4-risc-v"
+title: "The Last Mile of Replacing the IOE Stack: IvorySQL 5.4 on RISC-V"
+date: "2026-09-28"
+author: "Fu Chao"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-5-4-risc-v-en.png"
+tags: ["RISC-V", "openEuler", "Benchmark"]
+description: "Build IvorySQL 5.4 on a 128-core openEuler RISC-V server, validate Oracle extensions, and examine the 663–750 TPS benchmark baseline."
+---
+
+> About the author: Fu Chao is an Oracle ACE and PostgreSQL ACE, and a core member of the PostgreSQL Xi'an user group.
+
+## Highlights
+
+**Main finding:** IvorySQL 5.4 builds natively and runs stably on openEuler riscv64. The test found no instruction-set compatibility defects in the software, establishing a foundation for replacing an IOE stack (IBM, Oracle, and EMC).
+
+The performance result needs context: **663–750 TPS is a baseline obtained with default settings and fewer than 3% of the nominal resources of a 128-core machine.** The author attributes this gap to RISC-V single-core capability rather than the database, and distinguishes it from the server's overall capacity.
+
+This article follows the full test on real hardware:
+
+- **Why it is difficult:** How RISC-V and x86 memory models differ, and why databases depend on them.
+- **Can it build?** Native RISC-V binaries from source, without patches or closed-source dependencies.
+- **Does it run correctly?** The preloaded Oracle compatibility layer runs without architecture errors or segmentation faults.
+- **How fast is it?** 663–750 TPS, approximately 187 TPS per benchmark thread; the author's analysis attributes the bottleneck to the CPU.
+
+---
+
+## 00 Why Test a Database on RISC-V?
+
+Hardware and operating-system replacement paths are increasingly clear. **The database layer remains difficult**, because it must satisfy three demands simultaneously:
+
+1. **Concurrency primitives:** Spinlocks, latches, atomic counters, and lock-free structures.
+2. **MVCC visibility:** Transaction snapshots depend on correct memory ordering.
+3. **Crash recovery:** Broken WAL write ordering can lose data.
+
+All three depend on the **memory consistency model**.
+
+This is a central difference between RISC-V and x86. **Correct transactions after compilation matter more than compilation alone.**
+
+---
+
+## 01 What Makes Databases Difficult on RISC-V?
+
+Before the commands, we need to understand the conditions that give the results meaning.
+
+### A Different Memory Model from x86
+
+x86 uses **TSO (Total Store Order)**, which generally prevents reorderings other than Store-Load. RISC-V defaults to **RVWMO (Weak Memory Ordering)**, allowing more memory-access reorderings. Software must explicitly establish boundaries using fence and atomic memory operations such as amo.
+
+Ordinary applications may barely notice, but databases rely on memory barriers, atomic CAS, and spinlocks throughout the code. Incorrect implementations under RVWMO can cause intermittent visibility errors, elusive deadlocks, or abrupt TPS drops under concurrency.
+
+**The valuable observation was stable behavior: no abnormal lock contention or memory-barrier-related performance collapse appeared in the test.**
+
+### Instruction Set and ABI
+
+The tested hardware baseline is rv64gc (UCB RISC-V with RVC compressed instructions) and **lp64d**, the double-precision floating-point ABI, using GCC 12.3.1. This mainstream 64-bit combination includes floating point, compressed instructions, and atomics.
+
+The tested **RISC-V system and x86 are both little-endian**, avoiding substantial byte-order adaptation work across disk formats, WAL records, and network parsing.
+
+### Toolchain Availability
+
+Dependencies are the first hurdle in a source build. The **openEuler 24.03 LTS repositories provide riscv64 versions** of gcc, libicu, bison, flex, perl, readline, and zlib. They install directly through dnf; no dependency cross-compilation is needed.
+
+That availability is fundamental to independently building the stack.
+
+---
+
+## 02 Environment: A 128-Core Server with Eight NUMA Nodes
+
+The test machine has far more resources than basic validation requires. Its size is an essential reference for interpreting the performance section.
+
+```
+[highgo@openeuler-riscv64 ~]$ lscpu
+Architecture:          riscv64
+  Byte Order:          Little Endian
+CPU(s):                128
+  On-line CPU(s) list: 0-127
+NUMA:
+  NUMA node(s):        8
+  NUMA node0 CPU(s):   0-7,16-23
+  NUMA node1 CPU(s):   8-15,24-31
+  NUMA node2 CPU(s):   32-39,48-55
+  NUMA node3 CPU(s):   40-47,56-63
+  NUMA node4 CPU(s):   64-71,80-87
+  NUMA node5 CPU(s):   72-79,88-95
+  NUMA node6 CPU(s):   96-103,112-119
+  NUMA node7 CPU(s):   104-111,120-127
+
+[highgo@openeuler-riscv64 ~]$ uname -a
+Linux openeuler-riscv64 6.6.127-0.0.0.0.riscv64 #1 SMP Wed Jul 15 02:08:54 CST 2026
+riscv64 riscv64 riscv64 GNU/Linux
+
+[highgo@openeuler-riscv64 ~]$ free -g
+               total        used        free      shared  buff/cache   available
+Mem:             250           2         247           0           1         247
+Swap:              0           0           0
+```
+
+**Key environment readings:**
+
+| Item | Measured value | Relevance |
+| --- | --- | --- |
+| System | openEuler 24.03 LTS, kernel 6.6.127 | OS and instruction-set replacement stack |
+| CPU topology | 128 cores, 8 NUMA nodes, 16 cores per node | Cross-node memory access matters to databases |
+| Memory | 250 GB, almost entirely free | Defaults underuse the available memory |
+| **Swap** | **0** | **No swap-related fluctuations during this test** |
+| Storage | 0.9 TB NVMe | Root partition is only 4.6 GB; use a separate large data partition |
+
+**Swap is disabled.** This removes swapping as a source of TPS variation in the 663–750 range, but also leaves no swap cushion if memory is configured poorly.
+
+---
+
+## 03 Build and Deployment: Zero Patches
+
+A prerequisite for replacing the IOE stack is **building and deploying from source on the target hardware without proprietary binary packages**. If that fails, further validation cannot begin.
+
+The result was straightforward: **the complete source build passed on the first attempt, without patches or source changes.**
+
+**Step 1: Install dependencies** directly from openEuler, without cross-compiling.
+
+```bash
+sudo dnf install gcc icu libicu libicu-devel bison flex perl \
+     readline readline-devel zlib zlib-devel -y
+```
+
+**Step 2: Fetch the source and switch branches.**
+
+```bash
+git clone https://github.com/IvorySQL/IvorySQL.git
+cd IvorySQL
+git checkout -b IVORY_REL_5_STABLE origin/IVORY_REL_5_STABLE
+```
+
+**Step 3: Build and install** using -j32 parallelism.
+
+```bash
+./configure --prefix=/usr/local/ivorysql/ivorysql-5
+make -j32
+make install
+```
+
+**Step 4: Initialize and start.**
+
+```bash
+bin/initdb -D /opt/postgresql-19.3/ivorysql-5.x/data/
+
+# Output excerpt
+The database cluster will be initialized with locale "en_US.UTF-8".
+The default database encoding has accordingly been set to "UTF8".
+Data page checksums are enabled.                    # Data-page checksums are enabled by default
+selecting default "shared_buffers" ... 128MB        # Remember this value for section 05
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+Success.
+
+bin/pg_ctl -D /opt/postgresql-19.3/ivorysql-5.x/data/ -l logfile start
+waiting for server to start.... done
+server started
+```
+
+There were **no architecture-related errors**. The output is a native RISC-V binary (UCB RISC-V, RVC, double-float ABI, lp64d) without closed-source dependencies.
+
+**All deployment checks passed:**
+
+- ✅ Database initialization with initdb
+- ✅ Instance start and stop with pg_ctl
+- ✅ Data-page checksums
+- ✅ UTF-8 encoding
+- ✅ IvorySQL Oracle compatibility extensions
+- ✅ OS-user-to-database-superuser mapping
+- ✅ TCP connections, shared memory, and NVMe I/O without architecture errors
+
+**Finding:** No instruction-set barrier prevented deployment. IvorySQL 5.4 can be built independently on the tested RISC-V hardware without proprietary precompiled packages, meeting the basic deployment requirement for an IOE replacement.
+
+---
+
+## 04 The Oracle Compatibility Layer: A Migration Foundation
+
+Oracle syntax compatibility is central to IvorySQL and to migration selection. **A compatibility layer that crashes on the new architecture would undermine the migration.**
+
+The compatibility layer is more than a translation script. **Preloaded extensions** integrate with the kernel parser, executor, and shared memory. This means:
+
+- It shares the kernel's memory barriers and atomics, exposing it to the same weak-memory risks discussed earlier.
+- It initializes during shared_preload_libraries loading; address alignment, structure-layout, or atomic-operation differences can surface as startup crashes.
+
+Clean loading and stable execution therefore exercise important parts of the architecture port.
+
+The test preloaded three extensions through shared_preload_libraries:
+
+- **gb18030_2022:** Chinese national-standard encoding extension
+- **liboracle_parser:** Oracle syntax parser
+- **ivorysql_ora:** Core Oracle compatibility module
+
+**Results on riscv64:**
+
+- Extensions loaded and the instance started normally.
+- SQL execution produced **no segmentation faults or crashes**.
+- The Oracle parser and compatibility modules showed no architecture-related errors throughout the SQL workload.
+
+**The compatibility foundation held up in this test.** This provides a basis for proceeding to full application-SQL replay on RISC-V during Oracle migration assessment.
+
+### Install contrib Components Separately
+
+The default source build did not fully install contrib components such as btree_gin, intarray, and amcheck. Building and installing them with `make -C contrib install` adds more of the extension capabilities needed in a production-like environment.
+
+---
+
+## 05 Performance: Interpreting the Gap
+
+With compatibility checks complete, we can examine performance and its test conditions.
+
+### 5.1 Raw Results
+
+pgbench settings: **8 clients, 4 threads, 30 seconds**.
+
+| Platform | TPS | Conditions |
+| --- | --- | --- |
+| riscv64, this test | 663–750 | Default shared_buffers of 128 MB, no tuning |
+| x86, same kernel baseline | About 1600 | Same benchmark parameters |
+
+These two rows alone might suggest RISC-V delivers half the x86 performance, but that reading needs the surrounding conditions.
+
+### 5.2 Boundaries of the Measurement
+
+| Dimension | Value | Interpretation in the article |
+| --- | --- | --- |
+| Benchmark threads | 4 OS threads | About 3% relative to 128 available cores |
+| TPS per thread | About 187 (750 ÷ 4) | About 400 on x86; ratio about 0.47 |
+| shared_buffers | 128 MB | About 0.05% of a nominal 256 GB configuration |
+| NUMA | 8 nodes, no binding | Cross-node memory-access overhead remains |
+| Swap | 0 | No swap-related variation |
+| Storage | NVMe | The author did not identify disk as the bottleneck |
+
+**663–750 TPS represents this pgbench configuration with four benchmark threads and default settings. It is a baseline, not a measurement of the server's maximum capacity.**
+
+### 5.3 Comparing Per-Thread Results
+
+Dividing TPS by benchmark threads gives about **187 TPS/thread on riscv64** and **400 TPS/thread on x86**, a ratio near **0.47**.
+
+The author considers this comparable to the single-core IPC-times-frequency gap between the tested RISC-V processor and mainstream x86 servers, and interprets it as follows:
+
+> **No additional software penalty was apparent in this test.**
+
+Architecture-specific problems such as abnormal spinning, faulty memory barriers, cache-line alignment, or degraded atomics could reduce efficiency beyond the hardware gap and often produce substantial TPS variation.
+
+The measured **663–750 interval remained stable**, with no observed performance collapse, abnormal lock contention, or barrier-related degradation.
+
+**The author's conclusion attributes the gap to single-core CPU capability rather than the database software.** For compatibility validation, that interpretation matters more than the absolute TPS figure.
+
+### 5.4 Much of the Machine Remains Unexplored
+
+Four benchmark threads on a 128-core server leave substantial room for further testing. A fuller performance assessment needs these dimensions:
+
+1. **Concurrency scaling:** Raise clients/threads to 64/64 or 128/128 and observe how TPS scales. This is a key missing measurement for production suitability.
+2. **Memory:** Increase shared_buffers from 128 MB toward about 25% of memory, roughly 64 GB for a nominal 256 GB configuration.
+3. **NUMA:** Use numactl for memory binding and process affinity across the eight nodes to reduce remote-memory penalties.
+4. **Page tables:** Configure HugePages to reduce TLB misses.
+5. **WAL and checkpoints:** Tune wal_buffers, max_wal_size, and checkpoint parameters for the write path.
+6. **Storage:** The root partition is only 4.6 GB and 74% used. Plan a dedicated, larger NVMe data partition for production.
+
+### 5.5 Why Keep This Baseline?
+
+663–750 TPS is modest, but **it provides a comparison point**.
+
+Keeping parameters and the database kernel aligned across architectures helps compare later tuning and release changes against a known starting point, rather than relying on an isolated, heavily tuned result.
+
+---
+
+## 06 Compatibility Summary and Deployment Advice
+
+### Compatibility Overview
+
+| Assessment | Result reported by the author | Notes |
+| --- | --- | --- |
+| riscv64 source build and deployment | ✅ Compatible | Native binaries, no proprietary dependencies or patches |
+| Oracle compatibility extensions | ✅ Available | Clean preload and execution, no segmentation faults |
+| Standard SQL, transactions, concurrency | ✅ Compatible | Upstream core functionality worked in the test |
+| Performance baseline | ✅ No observed software penalty | Author attributes the gap to single-core CPU capability |
+| contrib extensions | ⚠️ Manual build/install | Not fully built by default |
+
+**Overall assessment:** IvorySQL 5.4 was usable on the tested RISC-V hardware, with no observed instruction-set-related functional defects, providing a foundation for IOE replacement.
+
+### Practical Recommendations
+
+**1. Build the full contrib set.**
+
+Run `make -C contrib install` to add btree_gin, intarray, amcheck, and other extensions needed around the database.
+
+**2. Tune large-memory servers instead of using defaults.**
+
+A 128 MB shared_buffers setting leaves most of a 256 GB server's memory unused by that cache. Consider roughly 25% of memory, HugePages, and NUMA binding. **Also run a high-concurrency benchmark, such as 64 or 128 threads, to measure scaling.**
+
+**3. Prioritize application replay for Oracle migration.**
+
+Validate ivorysql_ora coverage using full application-SQL replay on RISC-V. Confirm syntax coverage and performance before production migration.
+
+---
+
+## Closing Thoughts
+
+Replacing the IOE stack requires the hardware and software to work together. In this test, **source compilation, the Oracle layer, basic transactions, and the concurrent benchmark showed no instruction-set-related functional defects** in IvorySQL on RISC-V.
+
+Interpret the performance figure in context: **four benchmark threads, default parameters, and a 128 MB cache on a 128-core machine produced a stable 663–750 TPS. This is a starting point, not the server's ceiling.** The author attributes the gap to the processor and emphasizes the remaining capacity to explore.
+
+Production deployment still requires operations tools, backup and monitoring, middleware, and drivers to work across the stack. **A complete replacement requires every layer and integration to function in practice.**
+
+At the database layer, IvorySQL 5.4 passed this initial RISC-V validation.

@@ -1,0 +1,200 @@
+---
+slug: "oracle-migration-system-catalogs"
+title: "Assessing Oracle Migration: Successful SQL Is Not Enough—Inspect the System Catalogs"
+date: "2026-09-21"
+author: "Shi Jiawei"
+category: "IvorySQL"
+image: "/images/blog/covers/oracle-migration-system-catalogs-en.png"
+tags: ["Oracle", "Migration", "System Catalogs", "Package"]
+description: "Inspect system catalogs, Oracle types, and a transfer package to assess object organization and execution behavior in IvorySQL 5.4."
+---
+
+> About the author: Shi Jiawei has 12 years of database experience and is an Oracle ACE Pro and PostgreSQL ACE, with OCM/PGCM/KCM certifications. He serves on the IvorySQL Expert Advisory Committee, is a KVA, Yashan YVP and KWDB MVP, advises the PolarDB open-source community and HaloDB, evangelizes for the TiDB community, and advises the MOP technical community. WeChat publication: Digital Observer.
+
+A common Oracle migration assessment runs the source DDL and stored procedures on the target database and marks them “compatible” if no errors appear.
+
+That test is too coarse. Accepted syntax does not mean objects retain their Oracle organization. NUMBER might become numeric during parsing, and a Package might be split into standalone functions in pg_proc. Both approaches can execute SQL, but the remaining work differs: changing type names is one thing; changing every call site is another.
+
+My previous IvorySQL 5.4 test covered NUMBER, VARCHAR2, NVL, DECODE, sequences, and Packages. This time I reused the account-transfer package and inspected how the objects were actually stored in the catalogs.
+
+The test ran on Oracle Linux 8.10 with IvorySQL 5.4, based on PostgreSQL 18.4. I initialized the instance with `initdb -m oracle` and connected through psql to the Oracle-compatible port, 1521. The session already had compatible_mode set to oracle; no additional SET was needed.
+
+```sql
+SET search_path = compare, sys, public, pg_catalog;
+```
+
+`ivorysql.database_mode` was oracle and `ivorysql.enable_emptystring_to_NULL` was on.
+
+## NUMBER Remains NUMBER in pg_attribute
+
+The account table uses Oracle-style DDL:
+
+```sql
+CREATE TABLE account_balance (
+  account_id NUMBER PRIMARY KEY,
+  account_name VARCHAR2(50) NOT NULL,
+  balance NUMBER(18,2) NOT NULL,
+  updated_at DATE DEFAULT SYSDATE NOT NULL
+);
+```
+
+After creation, I joined pg_attribute to pg_type rather than relying on a successful CREATE:
+
+```sql
+SELECT a.attname,
+       format_type(a.atttypid, a.atttypmod) AS format_type,
+       t.typname
+FROM pg_attribute a
+JOIN pg_type t ON t.oid = a.atttypid
+WHERE a.attrelid = 'compare.account_balance'::regclass
+  AND a.attnum > 0
+  AND NOT a.attisdropped
+ORDER BY a.attnum;
+```
+
+| Column | format_type | typname |
+| --- | --- | --- |
+| account_id | number | number |
+| account_name | varchar2(50) | oravarcharbyte |
+| balance | number(18,2) | number |
+| updated_at | date | oradate |
+
+The typname for account_id and balance is number, not numeric. VARCHAR2(50) is displayed as varchar2(50), with the internal name oravarcharbyte; DATE maps to oradate.
+
+On native PostgreSQL 18, the same DDL needs numeric, character varying, and timestamp without time zone instead. IvorySQL registers Oracle types in the catalogs rather than simply renaming them during table creation.
+
+Although oravarcharbyte contains “byte,” I did not run a separate length-semantics test and cannot draw a conclusion about byte-based limits. The catalogs confirm that the column types are retained rather than mapped to native PG types at parse time.
+
+The log table behaves the same way. Sequences also retain Oracle-style access:
+
+```sql
+CREATE SEQUENCE transfer_seq START WITH 1 INCREMENT BY 1;
+SELECT transfer_seq.NEXTVAL FROM dual;
+```
+
+## Packages Are Recorded in pg_package
+
+The transfer package specification declares one procedure and one function:
+
+```sql
+CREATE OR REPLACE PACKAGE pkg_transfer AS
+  PROCEDURE transfer(
+    p_from_account NUMBER,
+    p_to_account NUMBER,
+    p_amount NUMBER
+  );
+  FUNCTION balance_of(p_account_id NUMBER) RETURN NUMBER;
+END pkg_transfer;
+```
+
+After creating it, I first checked pg_proc in the compare schema. Neither transfer nor balance_of appeared there. I then queried pg_catalog.pg_package:
+
+```sql
+SELECT oid, pkgname, pkgsrc
+FROM pg_catalog.pg_package
+WHERE pkgname = 'pkg_transfer';
+```
+
+The package has its own OID, and pkgsrc holds the original specification:
+
+```text
+pkgname | pkg_transfer
+pkgsrc  | PROCEDURE transfer(
+            p_from_account NUMBER,
+            p_to_account NUMBER,
+            p_amount NUMBER
+          );
+          FUNCTION balance_of(p_account_id NUMBER) RETURN NUMBER;
+          END pkg_transfer
+```
+
+PostgreSQL 18 has no pg_package. In the PG version of the test script, I split the logic into compare.transfer and compare.balance_of. Both appear in pg_proc, with prokind values p and f respectively.
+
+IvorySQL still uses a package-qualified call:
+
+```sql
+CALL pkg_transfer.transfer(1001, 1002, 125.50);
+SELECT pkg_transfer.balance_of(1001) FROM dual;
+```
+
+After splitting the package, these become `CALL transfer(...)` and `balance_of(...)`. Every pkg_transfer-prefixed call in applications, scripts, and other stored procedures must change. Those call sites are outside the DDL and will not appear in a schema scan.
+
+## The Package Body Preserves Execution Order
+
+A specification in the catalogs only proves that an object was stored. I also executed the package body:
+
+```sql
+CREATE OR REPLACE PACKAGE BODY pkg_transfer AS
+  PROCEDURE transfer(
+    p_from_account NUMBER,
+    p_to_account NUMBER,
+    p_amount NUMBER
+  ) IS
+    v_from_balance NUMBER(18,2);
+  BEGIN
+    SELECT balance
+    INTO v_from_balance
+    FROM account_balance
+    WHERE account_id = p_from_account
+    FOR UPDATE;
+
+    IF v_from_balance < p_amount THEN
+      RAISE EXCEPTION 'insufficient balance';
+    END IF;
+
+    UPDATE account_balance
+    SET balance = balance - p_amount,
+        updated_at = SYSDATE()
+    WHERE account_id = p_from_account;
+
+    UPDATE account_balance
+    SET balance = balance + p_amount,
+        updated_at = SYSDATE()
+    WHERE account_id = p_to_account;
+
+    INSERT INTO transfer_log(
+      log_id, from_account, to_account, amount, status
+    ) VALUES (
+      transfer_seq.NEXTVAL,
+      p_from_account,
+      p_to_account,
+      p_amount,
+      'SUCCESS'
+    );
+  END transfer;
+
+  FUNCTION balance_of(p_account_id NUMBER) RETURN NUMBER IS
+    v_balance NUMBER(18,2);
+  BEGIN
+    SELECT balance INTO v_balance
+    FROM account_balance
+    WHERE account_id = p_account_id;
+    RETURN v_balance;
+  END balance_of;
+END pkg_transfer;
+```
+
+The original Oracle package uses `raise_application_error(-20001, 'insufficient balance')`; here I replaced it with PL/iSQL's RAISE EXCEPTION. The order—lock, validate, update both accounts, and write the log—remains unchanged.
+
+Alice starts with 1000.00 and Bob with 500.00. After transferring 125.50, their balances are 874.50 and 625.50, and transfer_log contains one SUCCESS entry. `pkg_transfer.balance_of(1001)` returns 874.50.
+
+A subsequent transfer of 99999 stops at the balance check:
+
+```text
+ERROR:  insufficient balance
+CONTEXT:  PL/iSQL function transfer line 15 at RAISE
+```
+
+After the error, the balances remain 874.50 and 625.50, and transfer_log still contains only that one SUCCESS entry.
+
+The failed transfer matters more to me. It shows that pg_package references an executable body combining NUMBER variables, SELECT INTO, FOR UPDATE, SYSDATE, and sequence.NEXTVAL in a single call. RAISE occurs before either UPDATE or the INSERT, so the 99999 transfer never modifies the accounts or adds another log row. This script verifies a guard firing before changes, not a rollback after writes.
+
+## Conclusion
+
+Two implementations can both report “it works” while organizing objects very differently. Inspect the catalogs.
+
+After creating tables, inspect pg_attribute and pg_type to see whether columns retain number, oravarcharbyte, and oradate or become native PostgreSQL types. Check pg_package and pg_proc to distinguish an intact package from split members. Run successful and failed transfers and compare balances and logs to identify whether failure happens before account changes or afterward.
+
+IvorySQL 5.4 preserves the organization of types and Packages. The transfer package remains a package; migration mainly changes exception syntax and a few calls. For systems with many Packages, this saves work on both database objects and the application’s package.procedure call sites.
+
+IvorySQL project: [https://github.com/IvorySQL/IvorySQL](https://github.com/IvorySQL/IvorySQL)

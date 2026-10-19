@@ -1,0 +1,363 @@
+---
+slug: "ivorysql-rowid-vacuum-full"
+title: "Does VACUUM FULL Invalidate ROWID? Testing IvorySQL Compatibility"
+date: "2026-10-08"
+author: "qqtq"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-rowid-vacuum-full-en.png"
+tags: ["Oracle", "Compatibility", "ROWID"]
+description: "Test ROWID pseudocolumns, indexing, targeted updates, deduplication, and invalidation after table rewrites in IvorySQL 5.4."
+---
+
+> About the author: Qiqi Tianqing (qqtq) is a database practitioner based in Urumqi, sharing hands-on database experience and continuing to learn.
+
+Oracle rowid is a physical address pointing to a data file, block, and row position. Moving a row can change its rowid; address-based access explains why `WHERE rowid = ...` can locate updates so quickly. IvorySQL 5.4 offers an Oracle-compatible rowid pseudocolumn and the WITH ROWID table option. Its [RowID design document](https://docs.ivorysql.org/cn/ivorysql-doc/master/compatibility_features_design/rowid) presents it as a long-term alternative to ctid and says a UNIQUE index is created by default. However, IvorySQL rowid is a logical `(table OID, row sequence number)` identifier. How far does compatibility go? We test automatic indexing, rowid-based updates, sequence reuse after DELETE, Oracle-style MIN(rowid) deduplication, and validity after VACUUM FULL.
+
+## Environment and Software
+
+| Item | Value |
+| --- | --- |
+| Operating system | Rocky Linux 9.5 |
+| Database | PostgreSQL 18.4 (IvorySQL 5.4) |
+| Source | Tag IvorySQL_5.4, official Gitee repository; MD5 6491b889178b7a9a4382674837c8fdf8 |
+| Build options | `./configure --prefix=/opt/ivorysql/5.4 --without-llvm --without-icu --with-uuid=e2fs` |
+| Installation | /opt/ivorysql/5.4 |
+| Ports | 5432 (PG) and 1521 (Oracle compatibility), both served by one process |
+
+> The instance starts with `shared_preload_libraries = 'liboracle_parser,ivorysql_ora'`. ivorysql.default_with_rowids defaults to off. database_mode is internal (fixed for the connection; oracle here); compatible_mode is user-level, switchable per session, and defaults to pg.
+
+## Testing rowid
+
+### WITH ROWID Requires Oracle Compatibility Mode
+
+```sql
+SHOW ivorysql.compatible_mode;
+
+ ivorysql.compatible_mode
+--------------------------
+ pg
+(1 row)
+
+CREATE TABLE t_rowid (id int primary key, payload text) WITH ROWID;
+
+ERROR:  syntax error at or near "ROWID"
+LINE 1: ...TABLE t_rowid (id int primary key, payload text) WITH ROWID;
+                                                                 ^
+
+SET ivorysql.compatible_mode = oracle;
+CREATE TABLE t_rowid (id int primary key, payload text) WITH ROWID;
+
+CREATE TABLE
+```
+
+**Observation:** With database_mode=oracle but compatible_mode=pg, WITH ROWID fails at the syntax layer. It belongs to the Oracle-compatible parser, liboracle_parser, rather than native PG grammar. The same statement succeeds after switching the session to Oracle mode. All remaining tests use that mode.
+
+### Table Creation Also Creates an Index
+
+```sql
+\d t_rowid
+                   Table "public.t_rowid"
+ Column  |      Type       | Collation | Nullable | Default
+---------+-----------------+-----------+----------+---------
+ id      | pg_catalog.int4 |           | not null |
+ payload | text            |           |          |
+Indexes:
+    "t_rowid_pkey" PRIMARY KEY, btree (id)
+    "t_rowid_16385_rowid_idx" btree (rowid)
+```
+
+**Observation:** rowid is not an ordinary column, but CREATE TABLE ... WITH ROWID automatically creates a btree(rowid) index. Its name includes the table OID, 16385.
+
+### A Distinct Type: (Table OID, Row Sequence Number)
+
+```sql
+INSERT INTO t_rowid VALUES (1, 'first'), (2, 'second'), (3, 'third');
+SELECT rowid, id, payload FROM t_rowid ORDER BY id;
+
+   rowid   | id | payload
+-----------+----+---------
+ (16385,1) |  1 | first
+ (16385,2) |  2 | second
+ (16385,3) |  3 | third
+(3 rows)
+
+SELECT pg_typeof(rowid) AS rowid_type, length(rowid::text) AS rowid_len FROM t_rowid LIMIT 1;
+
+ rowid_type | rowid_len
+------------+-----------
+ rowid      |         9
+(1 row)
+```
+
+**Observation:** rowid has its own type. The nine-character value `(16385,1)` contains the table OID followed by a per-table sequence number starting at 1. It differs from PG ctid, which represents a physical position such as `(0,1)`.
+
+### Targeted Updates and DELETE/Reinsert
+
+```sql
+SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 't_rowid';
+
+        indexname        |                                  indexdef
+-------------------------+----------------------------------------------------------------------------
+ t_rowid_16385_rowid_idx | CREATE INDEX t_rowid_16385_rowid_idx ON public.t_rowid USING btree (rowid)
+ t_rowid_pkey            | CREATE UNIQUE INDEX t_rowid_pkey ON public.t_rowid USING btree (id)
+(2 rows)
+
+UPDATE t_rowid SET payload = payload || '_updated' WHERE rowid = (SELECT rowid FROM t_rowid WHERE id = 2) RETURNING rowid, id, payload;
+
+   rowid   | id |    payload
+-----------+----+----------------
+ (16385,2) |  2 | second_updated
+(1 row)
+```
+
+**Observation:** The rowid index is an ordinary, non-unique btree. This contradicts the design document's claim of a default UNIQUE index; the discrepancy and the VACUUM FULL degradation were reported in issue #2151. `WHERE rowid = ...` updates and RETURNING rowid work without changes.
+
+```sql
+DELETE FROM t_rowid WHERE id = 3;
+INSERT INTO t_rowid VALUES (3, 'third_again');
+SELECT ctid, rowid, id, payload FROM t_rowid ORDER BY id;
+
+ ctid  |   rowid   | id |    payload
+-------+-----------+----+----------------
+ (0,1) | (16385,1) |  1 | first
+ (0,4) | (16385,2) |  2 | second_updated
+ (0,5) | (16385,4) |  3 | third_again
+(3 rows)
+```
+
+**Observation:** After deleting id=3 and reinserting it, the new row gets `(16385,4)` rather than `(16385,3)`. The table-level allocator does not reclaim deleted sequence numbers. Its physical position, `(0,5)`, also differs from sequence number 4. Oracle code depending on possible rowid reuse after deletion will not behave the same way here. Conversely, cached rowids are safer against silently pointing to a newly inserted row.
+
+### VACUUM FULL Invalidates Existing rowids
+
+```sql
+CREATE TABLE t_vac (id int primary key, v text) WITH ROWID;
+INSERT INTO t_vac VALUES (1,'a'),(2,'b'),(3,'c'),(4,'d'),(5,'e');
+SELECT rowid, id, v FROM t_vac ORDER BY id;
+
+   rowid   | id | v
+-----------+----+---
+ (16395,1) |  1 | a
+ (16395,2) |  2 | b
+ (16395,3) |  3 | c
+ (16395,4) |  4 | d
+ (16395,5) |  5 | e
+(5 rows)
+
+VACUUM FULL t_vac;
+SELECT rowid, id, v FROM t_vac ORDER BY id;
+
+   rowid   | id | v
+-----------+----+---
+ (16395,0) |  1 | a
+ (16395,0) |  2 | b
+ (16395,0) |  3 | c
+ (16395,0) |  4 | d
+ (16395,0) |  5 | e
+(5 rows)
+
+SELECT count(*) FROM t_vac WHERE rowid = '(16395,1)';
+
+ count
+-------
+     0
+(1 row)
+
+SELECT count(*) FROM t_vac WHERE rowid = '(16395,0)';
+
+ count
+-------
+     5
+(1 row)
+```
+
+**Observation:** After VACUUM FULL rewrites the table, all five rowids become `(16395,0)`. The old `(16395,1)` matches no rows; `(16395,0)` matches all five. In this test, rowid is valid only until the table is rewritten; the source explanation follows below. Applications caching rowids must treat VACUUM FULL, CLUSTER, and table-rewriting ALTER operations as invalidation events. This behavior was reported in [issue #2151](https://github.com/IvorySQL/IvorySQL/issues/2151), consistent with related fixes underway in #2004 and #2037.
+
+### Enabling rowid with ALTER Does Not Create an Index
+
+```sql
+CREATE TABLE t_alter (id int primary key, memo text);
+ALTER TABLE t_alter SET WITH ROWID;
+INSERT INTO t_alter VALUES (1, 'x'), (2, 'y');
+SELECT rowid, id, memo FROM t_alter ORDER BY id;
+
+   rowid   | id | memo
+-----------+----+------
+ (16411,1) |  1 | x
+ (16411,2) |  2 | y
+(2 rows)
+
+SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 't_alter';
+
+  indexname   |                              indexdef
+--------------+---------------------------------------------------------------------
+ t_alter_pkey | CREATE UNIQUE INDEX t_alter_pkey ON public.t_alter USING btree (id)
+(1 row)
+```
+
+**Observation:** ALTER TABLE ... SET WITH ROWID adds the pseudocolumn without adding an index. Unlike the CREATE path, the ALTER path lacks automatic index creation.
+
+```sql
+EXPLAIN (COSTS OFF) SELECT * FROM t_vac WHERE rowid = '(16395,1)';
+
+               QUERY PLAN
+----------------------------------------
+ Seq Scan on t_vac
+   Filter: (rowid = '(16395,1)'::rowid)
+(2 rows)
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM t_vac WHERE rowid = '(16395,1)';
+
+                   QUERY PLAN
+-------------------------------------------------
+ Index Scan using t_vac_16395_rowid_idx on t_vac
+   Index Cond: (rowid = '(16395,1)'::rowid)
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM t_alter WHERE rowid = '(16395,1)';
+
+               QUERY PLAN
+----------------------------------------
+ Seq Scan on t_alter
+   Disabled: true
+   Filter: (rowid = '(16395,1)'::rowid)
+(3 rows)
+```
+
+**Observation:** A sequential scan is normal for a five-row table. Disabling sequential scans lets t_vac use t_vac_16395_rowid_idx, but t_alter has no available rowid index and must still scan the table. Disabled: true in the third plan is a PostgreSQL 18 marker: enable_seqscan=off discourages that path, but the planner has no alternative. After enabling rowid with ALTER, create the index manually with `CREATE INDEX ... ON t (rowid)`.
+
+### default_with_rowids Makes rowid the Default
+
+```sql
+SET ivorysql.default_with_rowids = on;
+CREATE TABLE t_def (id int primary key, v text);
+INSERT INTO t_def VALUES (1, 'a');
+SELECT rowid, id, v FROM t_def;
+
+   rowid   | id | v
+-----------+----+---
+ (16427,1) |  1 | a
+(1 row)
+
+SELECT indexname FROM pg_indexes WHERE tablename = 't_def';
+
+       indexname
+-----------------------
+ t_def_16427_rowid_idx
+ t_def_pkey
+(2 rows)
+```
+
+**Observation:** With this GUC on, ordinary CREATE TABLE statements get both the pseudocolumn and its index without WITH ROWID. This is convenient during migration, at the cost of one extra index per new table and sequence allocation on writes. RESET restores the default after testing.
+
+### Ordinary Tables Still Have No rowid in Oracle Mode
+
+```sql
+CREATE TABLE t_plain (id int primary key, v text);
+INSERT INTO t_plain VALUES (1, 'a');
+SELECT rowid, id, v FROM t_plain;
+
+ERROR:  "rowid": invalid identifier
+LINE 1: SELECT rowid, id, v FROM t_plain;
+               ^
+```
+
+**Observation:** rowid comes from a table option, not merely the session mode. Switching to Oracle mode does not give ordinary tables a pseudocolumn. Migrated SELECT rowid scripts require tables created with WITH ROWID or while default_with_rowids is on.
+
+### MIN(rowid) Deduplication Works Unchanged
+
+```sql
+CREATE TABLE t_dup (id int, city text) WITH ROWID;
+INSERT INTO t_dup VALUES (1, 'beijing'), (1, 'beijing'), (2, 'shanghai'), (2, 'beijing');
+SELECT id, city FROM t_dup WHERE rowid IN (SELECT MIN(rowid) FROM t_dup GROUP BY id, city) ORDER BY id, city;
+
+ id |   city
+----+----------
+  1 | beijing
+  2 | beijing
+  2 | shanghai
+(3 rows)
+```
+
+**Observation:** Grouping by (id, city) and retaining MIN(rowid) leaves one copy of `(1, beijing)`. This common Oracle deduplication pattern works without rewriting.
+
+### Uniqueness Within a Table: 5,000 Rows
+
+```sql
+CREATE TABLE t_big (id int primary key, v text) WITH ROWID;
+INSERT INTO t_big SELECT g, md5(g::text) FROM generate_series(1,5000) g;
+SELECT count(*), count(DISTINCT rowid) FROM t_big;
+
+ count | count
+-------+-------
+  5000 |  5000
+(1 row)
+```
+
+**Observation:** All 5,000 rowids are distinct. The sequence component starts at 1 in each table and is not unique across tables, but the full value includes the table OID, distinguishing tables within one database. OIDs are only database-local: add a database identifier when aggregating across databases. pg_dump/restore recreates tables with new OIDs, so applications holding cross-table rowid references must treat restore as another invalidation event.
+
+## Source References
+
+Three findings line up with the IvorySQL_5.4 source downloaded from the official Gitee repository. Line numbers may shift in later releases; use file and symbol names. First, rowid is a system pseudocolumn in the SysAtt[] array in src/backend/catalog/heap.c, using ROWIDOID and RowIdAttributeNumber:
+
+```bash
+[root@node1 ~]# sed -n '229,247p' /tmp/IvorySQL-IvorySQL_5.4/src/backend/catalog/heap.c
+static const FormData_pg_attribute a7 = {
+   .attname = {"rowid"},
+   .atttypid = ROWIDOID,
+   .attlen = -1,
+   .attnum = RowIdAttributeNumber,
+   .atttypmod = -1,
+   .attbyval = false,
+   .attalign = TYPALIGN_SHORT,
+   .attstorage = TYPSTORAGE_PLAIN,
+   .attnotnull = true,
+   .attislocal = true,
+};
+```
+
+Second, the RowIdAttributeNumber branch in src/backend/access/common/heaptuple.c assembles the value: values[0] is the table OID and values[1] is the sequence number stored in the tuple header. HEAP_HASROWID indicates whether that fixed header area contains a value:
+
+```bash
+[root@node1 ~]# sed -n '593,608p' /tmp/IvorySQL-IvorySQL_5.4/src/include/access/htup_details.h
+#define HeapTupleHeaderGetRowId(tup) \
+( \
+	((tup)->t_infomask & HEAP_HASROWID) ? \
+		*((int64 *) ((char *)(tup) + (tup)->t_hoff - sizeof(int64))) \
+	: \
+		-1	\
+)
+```
+
+Third, the table-level sequence relation->rd_rowdSeqid allocates the number. The insertion path heap_prepare_insert in heapam.c writes it using HeapTupleSetRowId(tup, seqnum), explaining why DELETE/reinsert does not move the sequence backward. VACUUM FULL uses rewriteheap.c through rewrite_heap(). That file contains zero rowid references; rewritten tuples lose the original sequence number and return `(oid,0)`, matching the test:
+
+```bash
+[root@node1 ~]# echo "rewriteheap.c 中 rowid 出现次数: $(grep -c -i 'rowid' /tmp/IvorySQL-IvorySQL_5.4/src/backend/access/heap/rewriteheap.c)"
+rewriteheap.c 中 rowid 出现次数: 0
+[root@node1 ~]# grep -n 'HeapTupleSetRowId\|rd_rowdSeqid' /tmp/IvorySQL-IvorySQL_5.4/src/backend/access/heap/heapam.c | head -8
+2214:	if (relation->rd_rel->relhasrowid && OidIsValid(relation->rd_rowdSeqid))
+2221:		seqnum = nextval_internal(relation->rd_rowdSeqid, true);
+2223:		HeapTupleSetRowId(tup, seqnum);
+3340:		HeapTupleSetRowId(newtup, HeapTupleGetRowId(&oldtup));
+```
+
+Automatic indexing appears below the comment “Build a default types index on rowid column” in src/backend/commands/tablecmds.c. During creation, an ordinary non-partitioned table with relhasrowid receives a btree index. ChooseRelationName(relname, "<oid>_rowid", "idx") generates names such as t_rowid_16385_rowid_idx. The ALTER path lacks this logic, so SET WITH ROWID does not create an index.
+
+## Migration Checks
+
+1. **Session mode:** rowid syntax and functionality require compatible_mode=oracle. With connection pools, set it consistently after connection rather than relying on defaults.
+2. **Lifetime:** In this test VACUUM FULL and CLUSTER invalidate existing rowids, producing `(oid,0)`. A table-rewriting ALTER assigns new sequence numbers, observed as `(oid,3)` and `(oid,4)`, so old values also stop locating rows. Treat these operations as cache invalidations and rebuild cached locators when necessary.
+3. **ALTER needs a manual index:** SET WITH ROWID adds the pseudocolumn without an index; rowid predicates otherwise require full scans.
+4. **Reusable SQL:** Targeted WHERE rowid updates, RETURNING rowid, and grouped MIN(rowid) deduplication work unchanged.
+5. **Ordinary tables lack the pseudocolumn:** Check the rowid table option or enable ivorysql.default_with_rowids during migration before using SELECT rowid.
+6. **Ports:** Both 5432 and 1521 listeners are normal; 1521 is the Oracle-compatible endpoint. Configure firewall access as needed.
+
+## Conclusion
+
+IvorySQL rowid preserves familiar syntax and common Oracle patterns, but its underlying semantics differ. The migration checklist above covers the practical steps; two concepts are essential.
+
+First, rowid is a logical `(table OID, row sequence number)` identifier rather than a physical address. Its per-table sequence only increases. Code depending on Oracle's possible reuse of a deleted row's rowid will behave differently. Cached rowids, however, will not silently point to replacement rows through sequence reuse.
+
+Second, the title describes a reproducible, source-backed behavior in the tested version: VACUUM FULL and CLUSTER make all rowids `(oid,0)`, so no old value locates its row. Rewriting ALTER operations assign fresh sequence numbers and also invalidate old values. Applications that cache rowids must register these operations as invalidation events and rebuild caches when necessary.
+
+IvorySQL rowid supports immediate row location within a session and familiar deduplication patterns, but should not be treated as a stable row address across table lifecycle changes.

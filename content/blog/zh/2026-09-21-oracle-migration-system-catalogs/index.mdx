@@ -1,0 +1,200 @@
+---
+slug: "oracle-migration-system-catalogs"
+title: "去 O 评估：SQL 跑通不等于兼容，还得查一遍系统目录"
+date: "2026-09-21"
+author: "施嘉伟"
+category: "IvorySQL"
+image: "/images/blog/covers/oracle-migration-system-catalogs-zh.png"
+tags: ["Oracle", "Migration", "System Catalogs", "Package"]
+description: "通过系统目录、类型与转账包实测，检查 IvorySQL 5.4 是否保留 Oracle 对象组织方式，以及成功和失败调用的行为。"
+---
+
+> 作者简介：施嘉伟，12 年数据库从业经验，Oracle ACE Pro、PostgreSQL ACE，OCM/PGCM/KCM 认证。 IvorySQL 专家顾问委员、KVA、崖山 YVP、KWDB MVP、PolarDB 开源社区/HaloDB 技术顾问、TiDB 社区技术布道师、青学会 MOP 技术社区专家顾问。微信公众号：《Digital Observer》
+
+去 O 评估里常见的做法，是把 Oracle 的建表语句和存储过程拿到目标库上跑一遍，不报错就记一笔「兼容」。
+
+这个判断太粗。语法能过，不代表对象还按 Oracle 的方式组织。NUMBER 可能在解析时被换成 numeric，Package 也可能被拆成几个独立函数挂在 pg_proc 下。SQL 都能跑通，后面的工作量却差一截：一种只是类型名，一种要改所有调用点。
+
+上一篇测过 IvorySQL 5.4 的 Oracle 兼容性，NUMBER、VARCHAR2、NVL、DECODE、序列和 Package 都跑过。这次还是那个账户转账包，我去系统表里看这些对象最后存成了什么。
+
+测试跑在 Oracle Linux 8.10 上，IvorySQL 5.4，内核 PostgreSQL 18.4，实例用 initdb -m oracle 建的。我用 psql 连 Oracle 兼容口 1521，连上之后 compatible_mode 已经是 oracle，不用再 SET。
+
+```sql
+SET search_path = compare, sys, public, pg_catalog;
+```
+
+ivorysql.database_mode 是 oracle，ivorysql.enable_emptystring_to_NULL 是 on。
+
+## NUMBER 在 pg_attribute 里还是 NUMBER
+
+账户表沿用 Oracle 写法：
+
+```sql
+CREATE TABLE account_balance (
+  account_id NUMBER PRIMARY KEY,
+  account_name VARCHAR2(50) NOT NULL,
+  balance NUMBER(18,2) NOT NULL,
+  updated_at DATE DEFAULT SYSDATE NOT NULL
+);
+```
+
+建完我把 pg_attribute 和 pg_type 连起来查，不信只看 CREATE 成功：
+
+```sql
+SELECT a.attname,
+       format_type(a.atttypid, a.atttypmod) AS format_type,
+       t.typname
+FROM pg_attribute a
+JOIN pg_type t ON t.oid = a.atttypid
+WHERE a.attrelid = 'compare.account_balance'::regclass
+  AND a.attnum > 0
+  AND NOT a.attisdropped
+ORDER BY a.attnum;
+```
+
+| 列 | format_type | typname |
+| --- | --- | --- |
+| account_id | number | number |
+| account_name | varchar2(50) | oravarcharbyte |
+| balance | number(18,2) | number |
+| updated_at | date | oradate |
+
+account_id 和 balance 的 typname 是 number，不是 numeric。VARCHAR2(50) 显示为 varchar2(50)，底层名 oravarcharbyte；DATE 对应 oradate。
+
+同一套 DDL 放到原生 PostgreSQL 18，类型得改成 numeric、character varying、timestamp without time zone。IvorySQL 建表时没有把名字换掉，而是把 Oracle 类型登记进了系统目录。
+
+oravarcharbyte 这个名字里有 byte，长度是不是按字节算，我这次没单写用例，不能当结论。目录能确认的是：列类型留下来了，不是解析阶段映射成 PG 原生类型。
+
+日志表一样。序列还是 Oracle 的取号写法：
+
+```sql
+CREATE SEQUENCE transfer_seq START WITH 1 INCREMENT BY 1;
+SELECT transfer_seq.NEXTVAL FROM dual;
+```
+
+## Package 记录在 pg_package
+
+转账包规格里一个过程、一个函数：
+
+```sql
+CREATE OR REPLACE PACKAGE pkg_transfer AS
+  PROCEDURE transfer(
+    p_from_account NUMBER,
+    p_to_account NUMBER,
+    p_amount NUMBER
+  );
+  FUNCTION balance_of(p_account_id NUMBER) RETURN NUMBER;
+END pkg_transfer;
+```
+
+建完我先在 compare schema 下查 pg_proc，没有 transfer 和 balance_of。转到 pg_catalog.pg_package：
+
+```sql
+SELECT oid, pkgname, pkgsrc
+FROM pg_catalog.pg_package
+WHERE pkgname = 'pkg_transfer';
+```
+
+pkg_transfer 有自己的 OID，pkgsrc 里是规格原文：
+
+```text
+pkgname | pkg_transfer
+pkgsrc  | PROCEDURE transfer(
+            p_from_account NUMBER,
+            p_to_account NUMBER,
+            p_amount NUMBER
+          );
+          FUNCTION balance_of(p_account_id NUMBER) RETURN NUMBER;
+          END pkg_transfer
+```
+
+PostgreSQL 18 没有 pg_package。测试脚本里我把同一段逻辑拆成 compare.transfer 和 compare.balance_of，两条都在 pg_proc，prokind 分别是 p 和 f。
+
+IvorySQL 这边调用还是包名加点：
+
+```sql
+CALL pkg_transfer.transfer(1001, 1002, 125.50);
+SELECT pkg_transfer.balance_of(1001) FROM dual;
+```
+
+拆包之后要改成 CALL transfer(...) 和 balance_of(...)。应用、脚本、别的存储过程里凡是带 pkg_transfer 前缀的地方都得跟着改。这些调用点不在 DDL 里，扫 schema 看不到。
+
+## 包体能按原来的顺序执行
+
+目录里有规格，只说明对象存下来了。包体我又跑了一遍：
+
+```sql
+CREATE OR REPLACE PACKAGE BODY pkg_transfer AS
+  PROCEDURE transfer(
+    p_from_account NUMBER,
+    p_to_account NUMBER,
+    p_amount NUMBER
+  ) IS
+    v_from_balance NUMBER(18,2);
+  BEGIN
+    SELECT balance
+    INTO v_from_balance
+    FROM account_balance
+    WHERE account_id = p_from_account
+    FOR UPDATE;
+
+    IF v_from_balance < p_amount THEN
+      RAISE EXCEPTION 'insufficient balance';
+    END IF;
+
+    UPDATE account_balance
+    SET balance = balance - p_amount,
+        updated_at = SYSDATE()
+    WHERE account_id = p_from_account;
+
+    UPDATE account_balance
+    SET balance = balance + p_amount,
+        updated_at = SYSDATE()
+    WHERE account_id = p_to_account;
+
+    INSERT INTO transfer_log(
+      log_id, from_account, to_account, amount, status
+    ) VALUES (
+      transfer_seq.NEXTVAL,
+      p_from_account,
+      p_to_account,
+      p_amount,
+      'SUCCESS'
+    );
+  END transfer;
+
+  FUNCTION balance_of(p_account_id NUMBER) RETURN NUMBER IS
+    v_balance NUMBER(18,2);
+  BEGIN
+    SELECT balance INTO v_balance
+    FROM account_balance
+    WHERE account_id = p_account_id;
+    RETURN v_balance;
+  END balance_of;
+END pkg_transfer;
+```
+
+Oracle 原包用 raise_application_error(-20001, 'insufficient balance')，这里换成 PL/iSQL 的 RAISE EXCEPTION。锁、校验、两笔更新、写日志的顺序没动。
+
+Alice 初始 1000.00，Bob 500.00。转出 125.50 之后是 874.50 和 625.50，transfer_log 一条 SUCCESS。pkg_transfer.balance_of(1001) 返回 874.50。
+
+再转 99999，停在余额检查：
+
+```text
+ERROR:  insufficient balance
+CONTEXT:  PL/iSQL function transfer line 15 at RAISE
+```
+
+报错后余额仍是 874.50 和 625.50，transfer_log 还是那一条 SUCCESS。
+
+失败这笔我更在意。报错说明 pg_package 里挂着能跑的包体，NUMBER 变量、SELECT INTO、FOR UPDATE、SYSDATE、sequence.NEXTVAL 都在同一次调用里。RAISE 在两笔 UPDATE 和 INSERT 之前，所以 99999 没改过账，也没有第二行日志。脚本验证的是守卫在改账前触发，不是先写入再回滚。
+
+## 总结
+
+同样报「跑通了」，实现可能完全不一样，要去系统目录里看。
+
+建表后查 pg_attribute 和 pg_type：列落在 number、oravarcharbyte、oradate 上，还是被换成了 PostgreSQL 原生类型。Package 查 pg_package 和 pg_proc：整包还在，还是成员被拆开了。成功和失败都跑一遍，再对一下余额和日志，看失败停在改账前还是改完才报错。
+
+IvorySQL 5.4 把类型和 Package 的组织方式留住了。转账包还是一个包，迁移时主要改异常写法和少量调用语句。现网 Package 多的话，省的是库里的对象，也是应用里那些 包名.过程名。
+
+IvorySQL 项目地址：[https://github.com/IvorySQL/IvorySQL](https://github.com/IvorySQL/IvorySQL)

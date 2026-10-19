@@ -243,5 +243,12 @@
     "author_url": "https://github.com/IvorySQL",
     "author_image_url": "https://github.com/ivorysql.png",
     "position": "PG Database Expert"
+  },
+  {
+    "author_id": "qqtq",
+    "author": "qqtq",
+    "author_url": "",
+    "author_image_url": "",
+    "position": "Database Practitioner"
   }
 ]
