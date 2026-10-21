@@ -12,6 +12,8 @@ export type IvoryEvent = {
   description: string;
   date: string;
   endDate?: string;
+  startsAt?: string;
+  endsAt?: string;
   location: string;
   eventType: string;
   type: "Online" | "Offline";
@@ -67,6 +69,8 @@ export function getEventData(
     description: (data.description as string) || "",
     date: (data.date as string) || "",
     endDate: data.endDate as string | undefined,
+    startsAt: data.startsAt as string | undefined,
+    endsAt: data.endsAt as string | undefined,
     location: (data.location as string) || "",
     eventType: (data.eventType as string) || "Conference",
     type: (data.type as "Online" | "Offline") || "Offline",
@@ -115,6 +119,8 @@ export function getSortedEvents(
       description: (data.description as string) || "",
       date: (data.date as string) || "",
       endDate: data.endDate as string | undefined,
+      startsAt: data.startsAt as string | undefined,
+      endsAt: data.endsAt as string | undefined,
       location: (data.location as string) || "",
       eventType: (data.eventType as string) || "Conference",
       type: (data.type as "Online" | "Offline") || "Offline",
