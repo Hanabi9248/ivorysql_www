@@ -507,9 +507,9 @@
   },
   "StoriesPage": {
     "metaTitle": "Customer Stories",
-    "metaDescription": "Real-world IvorySQL customer case studies from public sector, financial services, and beyond.",
+    "metaDescription": "Real-world IvorySQL customer case studies from financial services and beyond.",
     "heading": "Customer Stories",
-    "subheading": "Real-world IvorySQL customer case studies from public sector, financial services, and beyond."
+    "subheading": "Real-world IvorySQL customer case studies from financial services and beyond."
   },
   "StoriesUI": {
     "all": "All",

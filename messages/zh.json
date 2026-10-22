@@ -507,9 +507,9 @@
   },
   "StoriesPage": {
     "metaTitle": "客户案例",
-    "metaDescription": "IvorySQL 在公共安全、金融等行业的真实客户案例与实践经验分享。",
+    "metaDescription": "IvorySQL 在金融等行业的真实客户案例与实践经验分享。",
     "heading": "客户案例",
-    "subheading": "IvorySQL 在公共安全、金融等行业的真实客户案例与实践经验分享。"
+    "subheading": "IvorySQL 在金融等行业的真实客户案例与实践经验分享。"
   },
   "StoriesUI": {
     "all": "全部",
