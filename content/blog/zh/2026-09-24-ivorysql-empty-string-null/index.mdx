@@ -1,0 +1,408 @@
+---
+slug: "ivorysql-empty-string-null"
+title: "空字符串到底是不是 NULL？IvorySQL 兼容性实测"
+date: "2026-09-24"
+author: "qqtq"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-empty-string-null-zh.png"
+tags: ["Oracle", "Compatibility", "NULL"]
+description: "实测 IvorySQL 5.4 在 pg/oracle 模式下的空字符串、NULL、约束、拼接与存量数据行为，并定位转换开关源码。"
+---
+
+> 作者简介：柒柒天晴，现居乌鲁木齐，数据库从业者。记录分享数据库实践，持续学习。
+
+Oracle 和 PostgreSQL 对空字符串处理逻辑完全相反。
+
+- Oracle：空字符串`''`等价于`NULL`；`'' IS NULL`为真，`length('')`返回`NULL`，向`varchar2`写入`''`实际存储为`NULL`，NOT-NULL列插入`''`触发约束报错。
+- PostgreSQL：空字符串是独立有效值；`'' IS NULL`为假，`length('')`返回0，空串与`NULL`互不等同。
+
+Oracle业务迁移到PG生态时，依赖"空串等于NULL"的判断、过滤、拼接逻辑会出现行为异常。
+
+IvorySQL 通过会话GUC开关 `ivorysql.enable_emptystring_to_NULL` 实现Oracle兼容：当`ivorysql.compatible_mode = oracle`且该开关开启，**词法层将空串字面量解析为NULL，参数绑定层将零长度输入参数置为NULL**，在入口模拟Oracle语义；pg模式不会执行转换。该开关编译期默认值为`false`，本实例经数据目录`ivorysql.conf`显式置为`on`（见文末源码定位）。
+
+相关配置文档较为分散，本文基于 IvorySQL_5.4 源码编译环境完成完整实测，正文聚焦兼容性验证，编译安装步骤从略，仅在文末附[编译安装的 2 个典型报错及处理](#build-errors)。
+
+## 环境与软件说明
+
+| 项目 | 值 |
+| --- | --- |
+| 操作系统 | Rocky Linux 9.5 |
+| 数据库版本 | PostgreSQL 18.4 (IvorySQL 5.4) |
+| 安装目录 | /opt/ivorysql/5.4 |
+| 监听端口 | 5432(PG协议)、1521(Oracle兼容协议)，同一进程监听双端口 |
+
+> 测试计划：配置NULL显示标记，查看3项核心GUC；分别在pg/oracle两种兼容模式执行插入，验证`IS NULL`、`length()`、等值判断；覆盖默认值、NOT-NULL约束、UPDATE、函数、表达式；验证开关关闭行为、存量旧表行为。
+
+## 空串转 NULL 验证
+
+```sql
+-- 设置NULL显示标识
+\pset null '(NULL)'
+
+-- 查看核心兼容参数
+SELECT name, setting, context
+FROM pg_settings
+WHERE name IN ('ivorysql.database_mode', 'ivorysql.compatible_mode',
+               'ivorysql.enable_emptystring_to_NULL')
+ORDER BY name;
+
+                name                 | setting | context
+-------------------------------------+---------+----------
+ ivorysql.compatible_mode            | pg      | user
+ ivorysql.database_mode              | oracle  | internal
+ ivorysql.enable_emptystring_to_NULL | on      | user
+(3 rows)
+```
+
+初始状态：
+
+- `ivorysql.database_mode=oracle`（实例内部固定不可修改）
+- `ivorysql.compatible_mode=pg`
+- `ivorysql.enable_emptystring_to_NULL=on`
+
+> 后两项为会话可修改参数。
+
+### PG 兼容模式
+
+```sql
+CREATE TABLE t_empty (id int, v varchar(20));
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | t
+  2 | x | f       |   1 | f
+(2 rows)
+```
+
+**现象**：插入空串后，`is_null=false`、`len=0`、`v=''`条件成立，行为和原生 PostgreSQL 保持一致。
+
+### Oracle 兼容模式（开关 on）
+
+```sql
+SET ivorysql.compatible_mode = oracle;
+TRUNCATE t_empty;
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id |   v    | is_null |  len   | eq_empty
+----+--------+---------+--------+----------
+  1 | (NULL) | t       | (NULL) | (NULL)
+  2 | x      | f       |      1 | (NULL)
+(2 rows)
+
+-- 字面量空串测试
+SELECT '' IS NULL AS literal_is_null;
+
+ literal_is_null
+-----------------
+ t
+(1 row)
+
+-- 预处理绑定参数测试
+PREPARE p_empty(text) AS SELECT $1 IS NULL AS is_null, length($1) AS len;
+EXECUTE p_empty('');
+
+ is_null |  len
+---------+--------
+ t       | (NULL)
+(1 row)
+```
+
+**现象**：
+
+1. 插入`''`落库变为`NULL`；`is_null=true`，`length(v)`返回`(NULL)`，`v=''`比较结果返回未知`(NULL)`；
+2. 字面量`'' IS NULL`结果为 true；
+3. 绑定传入空字符串，同样被转换为`NULL`。
+
+> 转换发生在 SQL 解析与参数绑定阶段，不是存储层改写。
+
+### 默认值 & NOT-NULL 约束
+
+```sql
+-- 默认值为空串
+CREATE TABLE t_default2 (id int, v varchar2(20) DEFAULT '');
+INSERT INTO t_default2 (id) VALUES (1);
+SELECT * FROM t_default2;
+
+ id |   v
+----+--------
+  1 | (NULL)
+(1 row)
+
+-- NOT-NULL约束测试
+CREATE TABLE t_nn (id int, v varchar2(20) NOT NULL);
+INSERT INTO t_nn VALUES (2, ''); -- 插入空字符串
+
+ERROR:  null value in column "v" of relation "t_nn" violates not-null constraint
+DETAIL:  Failing row contains (2, null).
+```
+
+**现象**：
+
+1. `DEFAULT ''`，默认值空串被转换为`NULL`存入；
+2. NOT-NULL 列显式插入`''`，内部转为`NULL`，直接违反非空约束报错。
+
+### UPDATE 更新空串
+
+```sql
+UPDATE t_empty SET v = '' WHERE id = 2;
+SELECT id, v, v IS NULL AS is_null FROM t_empty ORDER BY id;
+
+ id |   v    | is_null
+----+--------+---------
+  1 | (NULL) | t
+  2 | (NULL) | t
+(2 rows)
+```
+
+**现象**：UPDATE 语句中赋值`''`同样被转成`NULL`。
+
+### 函数与表达式（oracle 模式）
+
+```sql
+-- 数值/日期/时间戳类型写入空串
+CREATE TABLE t_mix (id int, n numeric, d date, t timestamp);
+INSERT INTO t_mix VALUES (1, '', '', '');
+SELECT id, n IS NULL AS n_null, d IS NULL AS d_null, t IS NULL AS t_null FROM t_mix;
+
+ id | n_null | d_null | t_null
+----+--------+--------+--------
+  1 | t      | t      | t
+(1 row)
+
+-- 算术表达式
+SELECT 1 + '' AS a, 1 - '' AS b, 1 * '' AS c, 1 / '' AS d, 1 % '' AS e;
+
+   a    |   b    |   c    |   d    |   e
+--------+--------+--------+--------+--------
+ (NULL) | (NULL) | (NULL) | (NULL) | (NULL)
+(1 row)
+
+-- 函数与拼接
+SELECT length('') AS len_from_dual FROM dual;
+
+ len_from_dual
+---------------
+        (NULL)
+(1 row)
+
+SELECT id, COALESCE(v, '(default)') AS coalesce_v, v || '|x' AS concat_v
+FROM t_empty ORDER BY id;
+
+ id | coalesce_v | concat_v
+----+------------+----------
+  1 | (default)  | |x
+  2 | (default)  | |x
+(2 rows)
+
+-- 拼接行为对比：同一行、列值同为 NULL 时，两种模式给出相反结果
+-- pg 模式
+SET ivorysql.compatible_mode = pg;
+CREATE TABLE t_cmp (id int, v varchar(20));
+INSERT INTO t_cmp VALUES (1, 'x');
+UPDATE t_cmp SET v = NULL WHERE id = 1;
+SELECT id, v IS NULL AS is_null, v || '|x' AS concat_v FROM t_cmp;
+
+ id | is_null | concat_v
+----+---------+----------
+  1 | t       | (NULL)
+(1 row)
+
+-- oracle 模式，同一张表、同一行、同一个 NULL 值
+SET ivorysql.compatible_mode = oracle;
+SELECT id, v IS NULL AS is_null, v || '|x' AS concat_v FROM t_cmp;
+
+ id | is_null | concat_v
+----+---------+----------
+  1 | t       | |x
+(1 row)
+
+-- NULL 常量在两种模式下同样相反
+SET ivorysql.compatible_mode = oracle;
+SELECT NULL || '|x' AS null_lit_concat;
+
+ null_lit_concat
+-----------------
+ |x
+(1 row)
+
+SET ivorysql.compatible_mode = pg;
+SELECT NULL || '|x' AS null_lit_concat;
+
+ null_lit_concat
+-----------------
+ (NULL)
+(1 row)
+
+-- 回到 oracle 模式，继续后续测试
+SET ivorysql.compatible_mode = oracle;
+DROP TABLE t_cmp;
+
+-- 过滤计数
+SELECT count(*) AS eq_empty FROM t_empty WHERE v = '';
+
+ eq_empty
+----------
+        0
+(1 row)
+
+SELECT count(*) AS is_null FROM t_empty WHERE v IS NULL;
+
+ is_null
+---------
+       2
+(1 row)
+```
+
+**现象**：类型转换、算术、`length()` 都按 NULL 传播；字符串拼接是例外——`||` 按 Oracle 语义把 NULL 当空串。`v` 此时已是 NULL（`coalesce_v` 两行都落到 `(default)` 可证），`v || '|x'` 仍得到 `|x`；把同一行 NULL 值放到 pg 模式下再拼，结果是 `(NULL)`，NULL 常量在两种模式下同样一得 `|x` 一得 `(NULL)`。`WHERE v = ''` 过滤结果为 0 行——业务里这类条件要改成 `IS NULL`，这正是迁移时最容易踩的差异点。
+
+### 关闭空串转 NULL 开关（oracle 模式）
+
+```sql
+SET ivorysql.enable_emptystring_to_NULL = off;
+TRUNCATE t_empty;
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | t
+  2 | x | f       |   1 | f
+(2 rows)
+```
+
+**现象**：关闭开关后，即使处于 oracle 兼容模式，空串不再转换，恢复 PG 原生行为。
+
+### 切回 pg 模式，开关保持 on
+
+```sql
+SET ivorysql.enable_emptystring_to_NULL = on;
+SET ivorysql.compatible_mode = pg;
+TRUNCATE t_empty;
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | t
+  2 | x | f       |   1 | f
+(2 rows)
+```
+
+**现象**：pg 模式下，即便开关为 on，不会触发空串转 NULL。
+
+> 转换逻辑需要同时满足：`compatible_mode=oracle` + `enable_emptystring_to_NULL=on`。
+
+### 存量旧表测试（重点）
+
+```sql
+-- pg模式建表，写入真实空字符串
+SET ivorysql.compatible_mode = pg;
+CREATE TABLE t_legacy (id int, v varchar(20));
+INSERT INTO t_legacy VALUES (1, '');
+
+-- 切换到oracle模式，查询存量数据
+SET ivorysql.compatible_mode = oracle;
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_legacy;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | (NULL)
+(1 row)
+```
+
+**现象**：**已经落库的存量空串不会被改写**。切换 oracle 模式后，数据存储不变：`is_null=false`，`length=0`；仅表达式`v=''`返回`(NULL)`——这也说明 oracle 模式下`WHERE v=''`连真实空串也匹配不到，识别存量真实空串要在 pg 模式或关闭开关后执行，`length(v)=0` 则在两种模式下都成立。
+
+> 补充语法点：`varchar2`类型仅在`compatible_mode=oracle`会话中可创建，pg 模式执行建表会报类型不存在。
+
+## 功能开关源码定位
+
+查 GUC 定义、词法解析器和参数绑定三处代码，确认默认值和两个转换入口。
+
+```bash
+[root@node1 ~]# grep -n 'enable_emptystring_to_NULL' /tmp/IvorySQL-IvorySQL_5.4/src/backend/utils/misc/ivy_guc.c
+41:bool		enable_emptystring_to_NULL = false;
+139:		{"ivorysql.enable_emptystring_to_NULL", PGC_USERSET, COMPAT_ORACLE_OPTIONS,
+143:		&enable_emptystring_to_NULL,
+[root@node1 ~]# grep -n 'ivorysql.enable_emptystring_to_NULL' /opt/ivorysql/5.4/data/ivorysql.conf
+13:ivorysql.enable_emptystring_to_NULL = 'on'
+```
+
+1. **GUC 参数定义（ivy_guc.c）**：代码内部变量默认值是 `false`（第 41 行），GUC 注册在第 139-143 行，分类 `PGC_USERSET`、分组 `COMPAT_ORACLE_OPTIONS`，会话可修改。实例实际为 `on`，来自数据目录 `ivorysql.conf` 第 13 行的显式配置。
+
+```bash
+[root@node1 ~]# grep -n -B 4 -A 6 'enable_emptystring_to_NULL' /tmp/IvorySQL-IvorySQL_5.4/src/backend/oracle_parser/ora_scan.l
+654-											   false);
+655-							yylval->str = litbufdup(yyscanner);
+656-							if (strcmp(yylval->str, "") == 0 &&
+657-								ORA_PARSER == compatible_db &&
+658:								enable_emptystring_to_NULL)
+659-							{
+660-								return NULL_P;
+661-							}
+662-							return SCONST;
+663-						case xus:
+664-							yylval->str = litbufdup(yyscanner);
+```
+
+2. **字面量转换入口（ora_scan.l）**：解析器为 `ORA_PARSER` 且开关开启时，空串字面量直接返回 `NULL_P`（第 656-661 行），不再返回字符串常量 `SCONST`。
+
+```bash
+[root@node1 ~]# grep -n -B 3 -A 8 'enable_emptystring_to_NULL' /tmp/IvorySQL-IvorySQL_5.4/src/backend/tcop/postgres.c
+1992-				 * call.
+1993-				 */
+1994-				if (compatible_db == ORA_PARSER &&
+1995:					enable_emptystring_to_NULL &&
+1996-					plength == 0)
+1997-				{
+1998-					pbuf.data = NULL;		/* keep compiler quiet */
+1999-					csave = 0;
+2000-					isNull = true;
+2001-					plength = -1;
+2002-				}
+2003-				else
+
+```
+
+3. **绑定参数转换入口（postgres.c）**：绑定参数长度为 0 时置 `isNull = true`（第 1994-2002 行），对应 psql 会话里 `EXECUTE p_empty('')` 被转成 NULL 的结果。
+
+## 迁移要核对的点
+
+1. **参数策略**：`ivorysql.compatible_mode`会话级切换 pg/oracle；空串转 NULL 需要两项条件同时生效。业务依赖 Oracle"空串即 NULL"则保持开关 on，不需要该兼容可以关闭。
+2. **DDL 结构核对**：
+   - NOT-NULL 列：oracle 模式下插入`''`等价插入 NULL，如果源库业务允许存空串，迁移脚本需要特殊处理；
+   - `DEFAULT ''`：默认值会转为 NULL，确认业务是否符合预期；
+   - `varchar2`只能在 oracle 兼容会话创建。
+3. **存量数据**：切换兼容模式不会修改已存储数据；识别存量真实空串要在 pg 模式（或关闭开关）下用`WHERE v = ''`，oracle 模式下该条件不匹配任何行，也可改用两种模式都成立的`WHERE length(v) = 0`。
+4. **SQL 业务逻辑改造**：
+   - Oracle 中`''`本身就是 NULL，`WHERE col = ''` 实为 `col = NULL`，跟 NULL 比结果未知，一行都取不到；IvorySQL oracle 模式`col=''`同样查不到数据，要查空值得写 `col IS NULL`；
+   - 空串从 SQL 字面量或 JDBC/PLSQL 绑定参数进来，`length()`、`COALESCE` 都按 NULL 传播；字符串拼接`||` 按 Oracle 语义将 NULL 当空串处理（`NULL || 'x'` 得到 `x`，原生 PostgreSQL 下返回 `NULL`），两端行为相反，需要重新校验业务 SQL。
+5. **端口说明**：5432、1521 双端口监听是 IvorySQL 正常设计，1521 为 Oracle 兼容端口，按需放行防火墙。
+
+<a id="build-errors"></a>
+
+## 附：编译安装的典型报错
+
+最小化 Rocky Linux 9.5 从源码编译 IvorySQL 5.4，最容易卡住的是这两个报错，修复后续跑 `make` 即可；改过 configure 参数的先 `make distclean`。
+
+**1. configure 失败：没有 C 编译器**，装基础编译依赖后重跑：
+
+```bash
+configure: error: no acceptable C compiler found in $PATH
+# dnf install -y gcc make readline-devel zlib-devel flex bison perl-devel perl-ExtUtils-Embed
+```
+
+**2. uuid-ossp 编译中断：必须显式指定 UUID 库**，报错只提示加 `--with-uuid` 开关，不说明选哪个库；装 libuuid-devel 后重新 configure：
+
+```bash
+uuid-ossp.c:40:2: 错误：#error "please use configure's --with-uuid switch to select a UUID library"
+# dnf install -y libuuid-devel
+# make distclean
+# ./configure --prefix=/opt/ivorysql/5.4 --without-llvm --without-icu --with-uuid=e2fs
+```

@@ -10,22 +10,17 @@ export function MDXRenderer({ content }: { content: string }) {
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeRaw]}
       components={{
-        // Ensure code blocks render properly
-        code: ({ className, children, ...props }) => {
-          const match = /language-(\w+)/.exec(className || "");
-          const isInline = !match && !String(children).includes("\n");
-          return isInline ? (
-            <code className={className} {...props}>
-              {children}
-            </code>
-          ) : (
-            <pre className="border-border bg-muted/30 text-foreground overflow-x-auto rounded-lg border p-4">
-              <code className={className} {...props}>
-                {children}
-              </code>
-            </pre>
-          );
-        },
+        // ReactMarkdown already wraps fenced code in pre; style that wrapper once.
+        pre: ({ children }) => (
+          <pre className="border-border bg-muted/30 text-foreground overflow-x-auto rounded-lg border p-4">
+            {children}
+          </pre>
+        ),
+        code: ({ className, children }) => (
+          <code className={`${className || ""} [overflow-wrap:anywhere]`}>
+            {children}
+          </code>
+        ),
         // Make links open in new tab
         a: ({ children, href, ...props }) => (
           <a

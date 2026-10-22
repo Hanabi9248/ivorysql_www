@@ -1,0 +1,475 @@
+---
+slug: "ivorysql-5-6-risc-v-regression"
+title: "IvorySQL 5.6 RISC-V 实测：零补丁编译，468 项回归测试全过"
+date: "2026-10-12"
+author: "施嘉伟"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-5-6-risc-v-regression-zh.png"
+tags: ["RISC-V", "Regression Testing", "Oracle"]
+description: "IvorySQL 5.6 在 SG2042 RISC-V 服务器上零补丁编译，231 项 PG 与 237 项 Oracle 回归测试全过，并实测双端口与兼容能力边界。"
+---
+
+> 作者简介：施嘉伟，12 年数据库从业经验，Oracle ACE Pro、PostgreSQL ACE，OCM/PGCM/KCM 认证。 IvorySQL 专家顾问委员、KVA、崖山 YVP、KWDB MVP、PolarDB 开源社区/HaloDB 技术顾问、TiDB 社区技术布道师、青学会 MOP 技术社区专家顾问。微信公众号：《Digital Observer》
+
+## 官方包里没有 riscv64
+
+IvorySQL 5.6 在 2026 年 9 月 18 日发布，内核跟进到 PostgreSQL 18.6。翻一下官方 release 页面的二进制包：
+
+```
+IvorySQL-5.6-74c405c-20260914.aarch64.rpm
+IvorySQL-5.6-74c405c-20260914.arm64.deb
+IvorySQL-5.6-74c405c-20260917.amd64.deb
+IvorySQL-5.6-74c405c-20260917.x86_64.rpm
+```
+
+四个包，x86_64 和 ARM64 各两种格式。没有 riscv64。
+
+RISC-V 上想用 IvorySQL 5.6，只有源码编译一条路。
+
+"能不能编出来"和"编出来跑得对不对"是两个问题。国产化适配的文章我看过不少，很多文章停在"编译通过、能连上、执行了一条 select"。编译通过只证明代码能过编译器，离可用还差得远。新架构上容易出问题的地方在浮点格式化、内存对齐、字节序这些细节，完整的回归测试才能把它们抓出来。
+
+这次的目标很具体：跑完两套回归测试，再确认 Oracle 兼容能力的边界。
+
+## 测试环境
+
+| 项目 | 配置 |
+|---|---|
+| SoC | 算能 SOPHGO SG2042，双路 |
+| CPU | 128 核，8 个 NUMA node |
+| CPU 核心 | 平头哥玄铁 C920，2GHz |
+| ISA | rv64imafdc_zicntr_zicsr_zifencei_zihpm_xtheadvector |
+| 内存 | 250 GB |
+| 存储 | NVMe SSD 894 GB |
+| 操作系统 | openEuler 24.03 (LTS) |
+| 内核 | 6.6.127-0.0.0.0.riscv64 |
+| 编译器 | GCC 12.3.1 |
+
+这台机器 128 核、250G 内存、NVMe，规格和主流 x86 服务器没有代差。RISC-V 服务器已经不是小板子了。
+
+我自己就栽在这个印象上，后面编译那节会讲。
+
+顺带解释一个容易搞混的地方。dmidecode 报出的厂商是 SOPHGO 算能、型号 SG2042，但 /proc/cpuinfo 里的 mvendorid 是 0x5b7（平头哥），ISA 字符串带 xtheadvector，这是平头哥的私有向量扩展。
+
+两者并不矛盾。SG2042 是算能的芯片，CPU 核心使用平头哥的玄铁 C920。芯片厂商和核心设计方是两个角色，mvendorid 报告的是后者。RISC-V 生态把 IP 授权与芯片设计分开，这一点和 ARM 类似。
+
+## 编译结果：没有架构补丁
+
+### 拉源码
+
+```bash
+git clone --depth 1 --branch IvorySQL_5.6 \
+    https://github.com/IvorySQL/IvorySQL.git ivorysql-5.6
+cd ivorysql-5.6 && git log -1 --format="%H"
+# 74c405c9c355a8167322b3749bbc1b982a0eb0c0
+```
+
+74c405c 这个 commit 和官方发布包文件名里的哈希完全一致。我们编译的源码，就是官方 x86/ARM 二进制包所用的同一个提交。
+
+这样后面测到的差异才能归因到架构，而不是版本。适配验证先做这步交叉校验，成本很低。
+
+### 依赖与 configure
+
+openEuler 上装齐依赖：
+
+```bash
+dnf install -y gcc gcc-c++ make bison flex perl perl-ExtUtils-Embed \
+    readline-devel zlib-devel openssl-devel libicu-devel \
+    libxml2-devel libxslt-devel libuuid-devel e2fsprogs-devel \
+    systemd-devel python3-devel tcl-devel git wget
+```
+
+configure 参数：
+
+```bash
+./configure --prefix=/opt/ivorysql5.6 \
+    --with-uuid=e2fs --with-libxml --with-libxslt \
+    --with-icu --with-openssl --with-readline --with-systemd \
+    --without-llvm
+```
+
+这里有两个选择需要说明。
+
+没用 --enable-cassert。IvorySQL 官方 README 的示例是带 --enable-debug --enable-cassert 的，那是给开发调试用的配置，cassert 会让运行时慢三到五倍。适配验证如果带着它，后面所有性能观察都失去参考价值。做正式测试请务必去掉。
+
+加了 --without-llvm。RISC-V 上 LLVM 的 JIT 后端支持度不如 x86/ARM，第一轮适配先把这个变量收敛掉，跑通之后再单独验证 JIT 能不能开。变量一次只引入一个，出了问题才定位得了。
+
+结果是：configure 和 make 都一次通过，没有打补丁。
+
+标准的 ./configure && make && make install 流程直接跑完，编译日志里没有 error。官方虽然不提供 riscv64 包，但这次源码编译没有遇到架构相关的阻碍。
+
+### configure 输出里的三行
+
+编译顺利不代表没有信息量。RISC-V 与 x86/ARM 的实质差异，全在 configure 的探测输出里。
+
+**第一行，CRC-32C 掉到纯软件实现。**
+
+```
+checking for _mm_crc32_u8 and _mm_crc32_u32... no
+checking for __crc32cb, __crc32ch, __crc32cw, and __crc32cd... no
+checking for __builtin_loongarch_crcc_w_b_w, ... no
+checking which CRC-32C implementation to use... slicing-by-8
+```
+
+PostgreSQL 18 依次探测了四条硬件加速路径：x86 的 SSE4.2、ARMv8 的 CRC 扩展、ARMv8+SIMD、龙芯的专用内建函数。四条全部落空，回落到 slicing-by-8 查表法。
+
+根因在指令集层面，RISC-V 的标准扩展里没有 CRC 指令。编译时实际启用的指令集字符串是最直接的证据：
+
+```
+-march=rv64imafdc_zicsr_zifencei -mabi=lp64d
+```
+
+拆开看：rv64i 基础整数，m 乘除，a 原子，f 和 d 浮点，c 压缩指令。没有任何 CRC 相关扩展，也没有 B 扩展（Zbc 的 carry-less 乘法本可以加速 CRC，但 PG 没走这条路）。
+
+PostgreSQL 用 CRC-32C 校验每一条 WAL 记录，写入前必算。看到这里很自然会推导出"RISC-V 上写入密集负载会多付一笔账"。
+
+这个推断的方向没错，但量级差得很远。用 perf 实测后，pg_comp_crc32c_sb8 只占 0.14% CPU，SQL 解析函数 base_yyparse 占 1.48%。解析开销约为校验和的十倍。
+
+WAL 记录本身不大，CRC 计算在整个事务处理链路里的权重很小，被解析、规划、锁、缓冲区管理淹没了。指令集缺口的存在性和它的实际权重，是两件事。
+
+**第二行，一个容易被误读的 dummy.s。**
+
+```
+config.status: linking src/backend/port/tas/dummy.s to src/backend/port/tas.s
+```
+
+RISC-V 没有手写的 test-and-set 汇编，用了 dummy.s 占位。这行很容易被写成"自旋锁没有优化、性能存疑"。
+
+这个推论不成立。前面的四行输出已经给出了原因：
+
+```
+checking for builtin __sync int32/int64 atomic operations... yes
+checking for builtin __atomic int32/int64 atomic operations... yes
+```
+
+GCC 的内建原子操作全部可用。PG 的 s_lock.h 在这种情况下走 __sync_lock_test_and_set，而 -march 里的 a 扩展在，GCC 会把它编译成 RISC-V 的 amoswap 原子指令，是真正的硬件原子操作。
+
+dummy.s 只代表没有为这个架构手工写汇编，不代表没有硬件支持。CRC-32C 是指令集真缺，自旋锁是有硬件指令只是没手写汇编，混为一谈就是硬伤。
+
+**第三行，IvorySQL 自有代码也在这条链路上。**
+
+```
+config.status: linking src/interfaces/libpq/posix_ivysema.c
+               to src/interfaces/libpq/ivy_sema.c
+```
+
+这行是原生 PG 没有的，IvorySQL 在 libpq 层加了自己的信号量实现。适配时厂商自有代码往往最容易出问题，这次它顺利过了 POSIX 信号量这条路。
+
+### 编译并行度和机器规格
+
+第一次编译我按"RISC-V 内存小、每个并行任务预留 1.5G"的经验开了 -j2：
+
+| 阶段 | 并行参数 | 墙钟 | user | sys | 实际并行度 |
+|---|---|---|---|---|---|
+| 核心 backend | -j2 | 23m06s | 35m54s | 6m32s | 1.84 |
+| contrib | -j128 | 33.5s | 4m50s | 10m50s | 28.03 |
+
+并行度算法是 (user + sys) ÷ real。
+
+那 23 分钟只用了这台机器 1.4% 的算力，内存从头到尾没超过 4G。
+
+按嵌入式设备的思路配置编译参数，会低估这类 RISC-V 服务器。先看 nproc 和 free -h，再定并行度。
+
+contrib 阶段还有个现象：sys 时间是 user 的 2.24 倍，内核态占了大头。原因是 contrib 由几十个小模块组成，每个都要 fork gcc、建目录、装文件，高并行下进程创建和文件系统调用密集爆发。这也解释了为什么 -j128 只跑出 28 的并行度，不是机器不行，是模块数和依赖链填不满 128 核。
+
+### 产物验证
+
+```bash
+$ file /opt/ivorysql5.6/bin/postgres
+ELF 64-bit LSB executable, UCB RISC-V, RVC, double-float ABI,
+dynamically linked, interpreter /lib/ld-linux-riscv64-lp64d.so.1
+```
+
+RVC 对应 -march 里的 c（压缩指令），double-float ABI 和动态链接器 lp64d 对应 -mabi=lp64d。原生 RISC-V 构建，不是交叉编译。
+
+37 个二进制、52 个扩展 control 文件，齐全。
+
+## 两套回归测试，468 项全过
+
+编译通过只是起点，回归测试才决定这次适配能不能算"可用"。
+
+IvorySQL 维护着两套平行的测试体系。src/test/regress 是 PostgreSQL 原生测试集，入口 make check；src/oracle_test/regress 是 Oracle 兼容模式测试集，入口 make oracle-check。
+
+两个目录的子目录结构完全一致（authentication、isolation、recovery、subscription、ssl、icu 等），不是加了几个用例，是两套完整体系。顶层 GNUmakefile 里 all-check: check oracle-check 这一行把两个入口并列写了出来。
+
+### 结果
+
+| 测试集 | 目标 | 用例数 | 结果 | 耗时 |
+|---|---|---|---|---|
+| src/test/regress | make check | 231 | 全过 | 3m18.8s |
+| src/oracle_test/regress | make oracle-check | 237 | 全过 | 6m01.4s |
+| 合计 | | 468 | 零失败 | 约 9m20s |
+
+```
+# All 231 tests passed.
+# All 237 tests passed.
+```
+
+没有产生任何 regression.diffs。
+
+### 两套测试分别覆盖什么
+
+只跑 make check 的话，结论只能是"PostgreSQL 18.6 在 RISC-V 上跑得对"，因为那 231 项全是 PG 原生测试。
+
+IvorySQL 的 Oracle 兼容不是薄层包装，它在 backend 里挂了一套独立实现：
+
+```
+src/backend/oracle_parser     独立的 Oracle 语法解析器
+src/oracle_fe_utils           前端工具的 Oracle 分支
+contrib/ivorysql_ora          Oracle 兼容扩展本体
+contrib/ora_btree_gist        Oracle 数据类型的索引支持
+contrib/ora_btree_gin
+src/interfaces/libpq/ivytest  libpq 自有实现的测试
+```
+
+这些代码一行都不在 PG 测试集的覆盖范围内。237 项 Oracle 测试零失败，才能说 IvorySQL 自己那套东西在 RISC-V 上也是正确的。
+
+测试列表中的 ora_force_view 对应 Oracle 的强制建视图特性。这个用例说明 Oracle 测试覆盖了语义层，而不只是给 PG 测试换了名字。
+
+### 适配结果
+
+在这台 RISC-V 服务器上，IvorySQL 5.6 通过了功能正确性验证，没有使用架构补丁。浮点格式化、时间处理、压缩、分区、索引这些项目全部通过。
+
+前面提到的 CRC-32C 缺少硬件指令，影响的是性能路径，和功能正确性是两件事。国产架构的讨论里，"生态不成熟"和"跑不对"经常被混在一起说，这次的测试数据不支持后一种说法。
+
+## 部署时要分清两个端口
+
+功能全过之后，实际部署踩了两个坑。
+
+### 双端口对应两套 SQL 解析器
+
+初始化数据库，启动，然后试 Oracle 语法：
+
+```sql
+-- 连 5432（postgresql.conf 的 port）
+create table t_ora(id number(10), name varchar2(50));
+ERROR:  type "number" does not exist
+
+select sysdate from dual;
+ERROR:  relation "dual" does not exist
+```
+
+number 类型不存在，dual 虚表不存在。在 PG 端口上，这就是一个标准的 PostgreSQL。
+
+换一个端口，同样的语句：
+
+```sql
+-- 连 1521（ivorysql.conf 的 ivorysql.port）
+select 1 from dual;
+ ?column?
+----------
+        1
+
+show port;
+ port
+------
+ 5432
+```
+
+正常执行。注意第二条，show port 在 1521 连接上返回的是 5432。两个端口背后是同一个实例、同一份配置、同一份数据。
+
+机制和源码结构对得上。shared_preload_libraries 里预加载了 liboracle_parser，连接进入的端口决定了这个会话使用哪套解析器。走 1521 进来的会话挂 Oracle parser，认识 NUMBER、VARCHAR2、DUAL；走 5432 进来的用 PG 原生 parser，这些一概不认。
+
+同一个数据库实例，两种 SQL 方言，靠端口路由。
+
+这是迁移适配时最容易踩的坑，而且报错信息具有误导性。
+
+设想一个从 Oracle 迁移过来的团队。运维按习惯配了 5432，开发拿着 Oracle 语法的 SQL 连上去，得到的报错是 type "number" does not exist。这个报错会把人引向完全错误的方向，去查扩展装没装、去查 ivorysql_ora 是不是没加载、甚至怀疑编译有问题。
+
+实际上什么都没错，只是连错了端口。
+
+部署 IvorySQL 时，交付文档需要写清两点。第一，Oracle 兼容语法应连接 ivorysql.port（默认 1521），而不是 port（默认 5432）。第二，两个端口共享同一份数据，可以按团队需要分流，存量 Oracle 应用走 1521，新写的 PG 风格应用走 5432。
+
+### ivorysql.port 在哪里配置
+
+这个坑是跟着上一个来的。一机多实例时要错开端口，改 port = 5433 之后启动依然失败，1521 也被占着。
+
+然后就卡住了：
+
+```bash
+$ grep -i port /opt/ivorysql5.6/data/postgresql.conf
+64:#port = 5432    # (change requires restart)
+```
+
+整个 postgresql.conf 里只有这一个真正的端口参数，找不到 1521。日志里也不提。
+
+最后是在源码里挖出来的：
+
+```
+src/backend/utils/misc/ivy_guc.c:240:            1521, 1, 65535,
+src/backend/utils/misc/ivorysql.conf.sample:11:  #ivorysql.port = 1521
+```
+
+参数名是 ivorysql.port，但它在一个独立的 ivorysql.conf 里。
+
+IvorySQL 把 PG 原生参数放在 postgresql.conf，把扩展参数放在 ivorysql.conf。这个约定如果没有写进部署文档，排查端口问题时就只能翻源码。
+
+ivorysql.conf 的全貌：
+
+```
+#ivorysql.listen_addresses = 'localhost'   # Oracle mode 的监听地址
+#ivorysql.port = 1521                      # (change requires restart)
+
+ivorysql.enable_emptystring_to_NULL = 'on'
+shared_preload_libraries = 'gb18030_2022, liboracle_parser, ivorysql_ora'
+#ivorysql.identifier_case_switch = interchange   # normal/interchange/lowercase
+```
+
+两套监听配置完全对称：
+
+| 模式 | 监听地址 | 端口 | 配置文件 |
+|---|---|---|---|
+| PostgreSQL | listen_addresses | port | postgresql.conf |
+| Oracle | ivorysql.listen_addresses | ivorysql.port | ivorysql.conf |
+
+有个细节印证了这个设计。postgresql.conf 里 listen_addresses 的注释被改成了 what IP address(es) of Postgres mode to listen on，原版 PG 没有 Postgres mode 这个限定词。
+
+还有一点，ivorysql.port 处于注释状态却依然监听 1521，因为注释掉就走 GUC 默认值。改它必须取消注释，光改注释行不生效。
+
+## Oracle 兼容能力边界
+
+适配跑通之后实测了一轮 Oracle 特性。这部分结论和架构无关，在 x86 上表现一致，但对迁移评估最有用。
+
+### 已验证的 Oracle 兼容功能
+
+```sql
+create table t_ora(id number(10), name varchar2(50), created date);
+insert into t_ora values(1, 'RISC-V', sysdate);
+insert into t_ora values(2, '', sysdate);
+
+select id, name, nvl(name,'IS_NULL') as nvl_test,
+       to_char(created,'YYYY-MM-DD HH24:MI:SS') from t_ora;
+ id |  name  | nvl_test |     to_char
+----+--------+----------+---------------------
+ 1  | RISC-V | RISC-V   | 2026-09-20 23:48:02
+ 2  |        | IS_NULL  | 2026-09-20 23:48:02
+```
+
+第二行插入的是空字符串，nvl 返回了 IS_NULL，说明空字符串被当作 NULL。
+
+这对应 ivorysql.enable_emptystring_to_NULL = on，是 Oracle 和 PostgreSQL 最核心的语义差异之一。PG 原生行为下空串和 NULL 是两回事，迁移时这条不对齐，业务逻辑会大面积出错。IvorySQL 默认打开它，方向是对的。
+
+PACKAGE 也通过了测试：
+
+```sql
+create or replace package pkg_test as
+  function add_one(n number) return number;
+  procedure say_hello(name varchar2);
+end;
+/
+create or replace package body pkg_test as
+  function add_one(n number) return number as
+  begin
+    return n + 1;
+  end;
+  procedure say_hello(name varchar2) as
+  begin
+    raise notice 'hello %', name;
+  end;
+end;
+/
+
+select pkg_test.add_one(41) from dual;
+ add_one
+---------
+      42
+
+call pkg_test.say_hello('RISC-V');
+NOTICE:  hello RISC-V
+```
+
+包的声明与实现分离、包内函数、包内过程、/ 终结符，全部通过。
+
+这条对迁移评估的分量最重。PostgreSQL 原生没有 package 这个概念，而 Oracle 存量系统的业务逻辑大量封装在包里。包不支持，迁移基本等于重写；包支持，迁移才谈得上可行。
+
+### 仍然缺少的 Oracle 特性
+
+```sql
+select id, rownum from t_ora where rownum <= 2;
+ERROR:  "rownum": invalid identifier
+
+select table_name from user_tables;
+ERROR:  relation "user_tables" does not exist
+
+select level from dual connect by level <= 3;
+ERROR:  syntax error at or near "by"
+```
+
+三个缺口：ROWNUM 伪列、user_tables 等数据字典视图、CONNECT BY 层次查询。
+
+报错措辞的差异反映了两类不同的缺失。ROWNUM 报的是 "rownum": invalid identifier，这是 Oracle 风格的措辞（对应 ORA-00904），说明 Oracle parser 在工作，只是这个伪列没实现。CONNECT BY 报的是 syntax error，parser 根本不认识这个语法结构，没进文法。
+
+这两类的改造成本不一样。前者是找替代方案（LIMIT、窗口函数），后者要重写查询结构（WITH RECURSIVE）。评估迁移工作量时，值得按这个维度分类统计。
+
+### 标识符大小写
+
+```sql
+select CaseTest from (select 1 as CaseTest from dual) x;
+ casetest
+----------
+        1
+```
+
+混合大小写的标识符 CaseTest，输出的列名是全小写。
+
+ivorysql.identifier_case_switch 默认是 interchange，这个模式下未加引号的标识符走 PG 的小写规则，不是 Oracle 的大写规则。
+
+Oracle 里 SELECT CaseTest 得到的列名是 CASETEST，应用层如果按大写取结果集字段，在 IvorySQL 默认配置下会取不到。参数还有 normal 和 lowercase 两个取值，迁移前建议按自己的应用行为选定。
+
+## 结论
+
+以下结论都来自这一台 SG2042 服务器，换硬件、换内核都需要重新验证。
+
+能编。标准的 configure、make、make install 直接跑通，没有打补丁，编译日志没有 error。官方不提供 riscv64 二进制包，但源码编译没遇到架构相关的阻碍。
+
+跑得对。468 项回归测试零失败（PG 原生 231 加 Oracle 兼容 237），未产生 regression.diffs。
+
+Oracle 兼容可以用。PACKAGE、Oracle 数据类型、DUAL、NVL、DECODE、空串转 NULL 通过；ROWNUM、数据字典视图、CONNECT BY 有缺口。这三个缺口在 x86 上同样存在，属于产品能力边界，与架构无关。
+
+RISC-V 缺少 CRC 硬件指令这件事，实测 pg_comp_crc32c_sb8 只占 0.14% CPU，SQL 解析的开销是它的十倍。缺口确实存在，但在这类负载里的权重很小。
+
+IvorySQL 5.6 在这台 RISC-V 服务器上已经过了"能不能跑"这一关。
+
+## 完整复现步骤
+
+```bash
+# 1. 依赖
+dnf install -y gcc gcc-c++ make bison flex perl perl-ExtUtils-Embed \
+    readline-devel zlib-devel openssl-devel libicu-devel \
+    libxml2-devel libxslt-devel libuuid-devel e2fsprogs-devel \
+    systemd-devel python3-devel tcl-devel git wget
+
+# 2. 源码
+useradd -m ivorysql && su - ivorysql
+git clone --depth 1 --branch IvorySQL_5.6 \
+    https://github.com/IvorySQL/IvorySQL.git ivorysql-5.6
+cd ivorysql-5.6
+
+# 3. 编译（并行度按 nproc 定，别用经验值）
+./configure --prefix=/opt/ivorysql5.6 \
+    --with-uuid=e2fs --with-libxml --with-libxslt \
+    --with-icu --with-openssl --with-readline --with-systemd \
+    --without-llvm
+make -j$(nproc)
+make install && make -j$(nproc) -C contrib install
+
+# 4. 回归测试（两套都要跑）
+make check           # PG 原生，231 项
+make oracle-check    # Oracle 兼容，237 项
+
+# 5. 初始化与启动
+/opt/ivorysql5.6/bin/initdb -D /opt/ivorysql5.6/data \
+    -E UTF8 --locale=C -m oracle
+/opt/ivorysql5.6/bin/pg_ctl -D /opt/ivorysql5.6/data \
+    -l /opt/ivorysql5.6/data/logfile start
+
+# 6. 验证（注意两个端口）
+psql -p 5432 -c "select version();"         # PG 模式
+psql -p 1521 -c "select sysdate from dual;" # Oracle 模式
+```
+
+一机多实例需要改端口时，两个配置文件都要改：
+
+```
+postgresql.conf:  port = 5433
+ivorysql.conf:    ivorysql.port = 1522
+```

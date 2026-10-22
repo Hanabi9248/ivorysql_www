@@ -1,0 +1,403 @@
+---
+slug: "ivorysql-empty-string-null"
+title: "Is an Empty String Really NULL? Testing IvorySQL Compatibility"
+date: "2026-09-24"
+author: "qqtq"
+category: "IvorySQL"
+image: "/images/blog/covers/ivorysql-empty-string-null-en.png"
+tags: ["Oracle", "Compatibility", "NULL"]
+description: "Test empty strings, NULL, constraints, concatenation, and existing data in IvorySQL 5.4, with source references for the conversion switch."
+---
+
+> About the author: Qiqi Tianqing (qqtq) is a database practitioner based in Urumqi, sharing hands-on database experience and continuing to learn.
+
+Oracle and PostgreSQL treat empty strings in opposite ways.
+
+- Oracle: the empty string `''` is equivalent to `NULL`; `'' IS NULL` is true, `length('')` returns `NULL`, inserting `''` into varchar2 stores NULL, and inserting it into a NOT NULL column raises a constraint error.
+- PostgreSQL: an empty string is a valid, distinct value; `'' IS NULL` is false and `length('')` returns 0. Empty strings and NULL are different.
+
+When Oracle applications move to the PG ecosystem, conditions, filters, and concatenation that depend on empty strings being NULL can change behavior.
+
+IvorySQL provides the session GUC `ivorysql.enable_emptystring_to_NULL`. When `ivorysql.compatible_mode = oracle` and the switch is enabled, **the lexer parses empty-string literals as NULL, and parameter binding converts zero-length input parameters to NULL**. This reproduces Oracle semantics at the input boundary; PG mode does not convert them. The compiled default is false. This instance explicitly sets it to on in the data directory's ivorysql.conf, as shown in the source references below.
+
+Configuration details are scattered, so this article tests a source-built IvorySQL_5.4 environment. It focuses on compatibility rather than installation; [two typical build errors and their fixes](#build-errors) appear in the appendix.
+
+## Environment and Software
+
+| Item | Value |
+| --- | --- |
+| Operating system | Rocky Linux 9.5 |
+| Database | PostgreSQL 18.4 (IvorySQL 5.4) |
+| Installation | /opt/ivorysql/5.4 |
+| Ports | 5432 (PG) and 1521 (Oracle compatibility), both served by one process |
+
+> Test plan: configure a NULL display marker and inspect three core GUCs; insert in both PG and Oracle modes and check IS NULL, length(), and equality; cover defaults, NOT NULL, UPDATE, functions, and expressions; test the disabled switch and existing table data.
+
+## Testing Empty-String-to-NULL Conversion
+
+```sql
+-- Set the NULL display marker
+\pset null '(NULL)'
+
+-- Inspect core compatibility settings
+SELECT name, setting, context
+FROM pg_settings
+WHERE name IN ('ivorysql.database_mode', 'ivorysql.compatible_mode',
+               'ivorysql.enable_emptystring_to_NULL')
+ORDER BY name;
+
+                name                 | setting | context
+-------------------------------------+---------+----------
+ ivorysql.compatible_mode            | pg      | user
+ ivorysql.database_mode              | oracle  | internal
+ ivorysql.enable_emptystring_to_NULL | on      | user
+(3 rows)
+```
+
+Initial settings:
+
+- `ivorysql.database_mode=oracle` (fixed internally for this instance)
+- `ivorysql.compatible_mode=pg`
+- `ivorysql.enable_emptystring_to_NULL=on`
+
+> The last two settings can be changed within a session.
+
+### PG Compatibility Mode
+
+```sql
+CREATE TABLE t_empty (id int, v varchar(20));
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | t
+  2 | x | f       |   1 | f
+(2 rows)
+```
+
+**Observation:** After inserting an empty string, is_null is false, len is 0, and `v=''` is true, matching native PostgreSQL.
+
+### Oracle Compatibility Mode, Switch On
+
+```sql
+SET ivorysql.compatible_mode = oracle;
+TRUNCATE t_empty;
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id |   v    | is_null |  len   | eq_empty
+----+--------+---------+--------+----------
+  1 | (NULL) | t       | (NULL) | (NULL)
+  2 | x      | f       |      1 | (NULL)
+(2 rows)
+
+-- Test an empty-string literal
+SELECT '' IS NULL AS literal_is_null;
+
+ literal_is_null
+-----------------
+ t
+(1 row)
+
+-- Test a prepared-statement parameter
+PREPARE p_empty(text) AS SELECT $1 IS NULL AS is_null, length($1) AS len;
+EXECUTE p_empty('');
+
+ is_null |  len
+---------+--------
+ t       | (NULL)
+(1 row)
+```
+
+**Observations:**
+
+1. Inserting `''` stores NULL: is_null is true, length(v) returns NULL, and `v=''` evaluates to unknown (NULL).
+2. The literal expression `'' IS NULL` is true.
+3. An empty string supplied as a bound parameter is also converted to NULL.
+
+> Conversion happens during SQL parsing and parameter binding, not through a storage-layer rewrite.
+
+### Defaults and NOT NULL Constraints
+
+```sql
+-- Empty-string default
+CREATE TABLE t_default2 (id int, v varchar2(20) DEFAULT '');
+INSERT INTO t_default2 (id) VALUES (1);
+SELECT * FROM t_default2;
+
+ id |   v
+----+--------
+  1 | (NULL)
+(1 row)
+
+-- Test the NOT NULL constraint
+CREATE TABLE t_nn (id int, v varchar2(20) NOT NULL);
+INSERT INTO t_nn VALUES (2, ''); -- Insert an empty string
+
+ERROR:  null value in column "v" of relation "t_nn" violates not-null constraint
+DETAIL:  Failing row contains (2, null).
+```
+
+**Observations:**
+
+1. With `DEFAULT ''`, the default empty string becomes NULL in storage.
+2. Explicitly inserting `''` into a NOT NULL column converts it to NULL and raises a constraint violation.
+
+### Assigning an Empty String with UPDATE
+
+```sql
+UPDATE t_empty SET v = '' WHERE id = 2;
+SELECT id, v, v IS NULL AS is_null FROM t_empty ORDER BY id;
+
+ id |   v    | is_null
+----+--------+---------
+  1 | (NULL) | t
+  2 | (NULL) | t
+(2 rows)
+```
+
+**Observation:** Assigning `''` in an UPDATE also converts it to NULL.
+
+### Functions and Expressions in Oracle Mode
+
+```sql
+-- Insert empty strings into numeric, date, and timestamp columns
+CREATE TABLE t_mix (id int, n numeric, d date, t timestamp);
+INSERT INTO t_mix VALUES (1, '', '', '');
+SELECT id, n IS NULL AS n_null, d IS NULL AS d_null, t IS NULL AS t_null FROM t_mix;
+
+ id | n_null | d_null | t_null
+----+--------+--------+--------
+  1 | t      | t      | t
+(1 row)
+
+-- Arithmetic expressions
+SELECT 1 + '' AS a, 1 - '' AS b, 1 * '' AS c, 1 / '' AS d, 1 % '' AS e;
+
+   a    |   b    |   c    |   d    |   e
+--------+--------+--------+--------+--------
+ (NULL) | (NULL) | (NULL) | (NULL) | (NULL)
+(1 row)
+
+-- Functions and concatenation
+SELECT length('') AS len_from_dual FROM dual;
+
+ len_from_dual
+---------------
+        (NULL)
+(1 row)
+
+SELECT id, COALESCE(v, '(default)') AS coalesce_v, v || '|x' AS concat_v
+FROM t_empty ORDER BY id;
+
+ id | coalesce_v | concat_v
+----+------------+----------
+  1 | (default)  | |x
+  2 | (default)  | |x
+(2 rows)
+
+-- Compare concatenation: the same NULL row gives different results in the two modes
+-- PG mode
+SET ivorysql.compatible_mode = pg;
+CREATE TABLE t_cmp (id int, v varchar(20));
+INSERT INTO t_cmp VALUES (1, 'x');
+UPDATE t_cmp SET v = NULL WHERE id = 1;
+SELECT id, v IS NULL AS is_null, v || '|x' AS concat_v FROM t_cmp;
+
+ id | is_null | concat_v
+----+---------+----------
+  1 | t       | (NULL)
+(1 row)
+
+-- Oracle mode: the same table, row, and NULL value
+SET ivorysql.compatible_mode = oracle;
+SELECT id, v IS NULL AS is_null, v || '|x' AS concat_v FROM t_cmp;
+
+ id | is_null | concat_v
+----+---------+----------
+  1 | t       | |x
+(1 row)
+
+-- A NULL literal also gives different results in the two modes
+SET ivorysql.compatible_mode = oracle;
+SELECT NULL || '|x' AS null_lit_concat;
+
+ null_lit_concat
+-----------------
+ |x
+(1 row)
+
+SET ivorysql.compatible_mode = pg;
+SELECT NULL || '|x' AS null_lit_concat;
+
+ null_lit_concat
+-----------------
+ (NULL)
+(1 row)
+
+-- Return to Oracle mode for the remaining tests
+SET ivorysql.compatible_mode = oracle;
+DROP TABLE t_cmp;
+
+-- Count filtered rows
+SELECT count(*) AS eq_empty FROM t_empty WHERE v = '';
+
+ eq_empty
+----------
+        0
+(1 row)
+
+SELECT count(*) AS is_null FROM t_empty WHERE v IS NULL;
+
+ is_null
+---------
+       2
+(1 row)
+```
+
+**Observation:** Type conversion, arithmetic, and length() propagate NULL. Concatenation is the exception: Oracle-style `||` treats NULL as an empty string. Here v is already NULL—both coalesce_v results use `(default)`—yet `v || '|x'` returns `|x`. With the same NULL row in PG mode, the result is NULL. A NULL literal likewise returns `|x` in Oracle mode and NULL in PG mode. `WHERE v = ''` selects zero rows; application predicates of this kind need IS NULL. This is an easy migration trap.
+
+### Disabling Conversion in Oracle Mode
+
+```sql
+SET ivorysql.enable_emptystring_to_NULL = off;
+TRUNCATE t_empty;
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | t
+  2 | x | f       |   1 | f
+(2 rows)
+```
+
+**Observation:** With the switch off, empty strings are no longer converted even in Oracle mode, restoring native PG empty-string behavior.
+
+### Returning to PG Mode with the Switch On
+
+```sql
+SET ivorysql.enable_emptystring_to_NULL = on;
+SET ivorysql.compatible_mode = pg;
+TRUNCATE t_empty;
+INSERT INTO t_empty VALUES (1, '');
+INSERT INTO t_empty VALUES (2, 'x');
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_empty ORDER BY id;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | t
+  2 | x | f       |   1 | f
+(2 rows)
+```
+
+**Observation:** In PG mode, enabling the switch does not trigger conversion.
+
+> Both conditions are required: `compatible_mode=oracle` and `enable_emptystring_to_NULL=on`.
+
+### Existing Table Data: An Important Test
+
+```sql
+-- Create a table in PG mode and store a real empty string
+SET ivorysql.compatible_mode = pg;
+CREATE TABLE t_legacy (id int, v varchar(20));
+INSERT INTO t_legacy VALUES (1, '');
+
+-- Switch to Oracle mode and query existing data
+SET ivorysql.compatible_mode = oracle;
+SELECT id, v, v IS NULL AS is_null, length(v) AS len, v = '' AS eq_empty FROM t_legacy;
+
+ id | v | is_null | len | eq_empty
+----+---+---------+-----+----------
+  1 |   | f       |   0 | (NULL)
+(1 row)
+```
+
+**Observation:** **Empty strings already in storage are not rewritten.** Switching to Oracle mode leaves is_null false and length at 0. Only `v=''` becomes unknown (NULL). Consequently, that predicate cannot even match genuine stored empty strings in Oracle mode. Identify them in PG mode or with conversion disabled; `length(v)=0` works in either mode.
+
+> Syntax note: varchar2 columns can be created only in compatible_mode=oracle sessions. In PG mode, table creation reports that the type does not exist.
+
+## Locating the Switch in Source
+
+Three code locations—the GUC definition, lexer, and parameter binding—establish the default and the two conversion entry points.
+
+```bash
+[root@node1 ~]# grep -n 'enable_emptystring_to_NULL' /tmp/IvorySQL-IvorySQL_5.4/src/backend/utils/misc/ivy_guc.c
+41:bool		enable_emptystring_to_NULL = false;
+139:		{"ivorysql.enable_emptystring_to_NULL", PGC_USERSET, COMPAT_ORACLE_OPTIONS,
+143:		&enable_emptystring_to_NULL,
+[root@node1 ~]# grep -n 'ivorysql.enable_emptystring_to_NULL' /opt/ivorysql/5.4/data/ivorysql.conf
+13:ivorysql.enable_emptystring_to_NULL = 'on'
+```
+
+1. **GUC definition (ivy_guc.c):** The internal variable defaults to false at line 41. Registration at lines 139–143 uses PGC_USERSET and COMPAT_ORACLE_OPTIONS, allowing session changes. This instance's on value comes from an explicit setting at line 13 of its ivorysql.conf.
+
+```bash
+[root@node1 ~]# grep -n -B 4 -A 6 'enable_emptystring_to_NULL' /tmp/IvorySQL-IvorySQL_5.4/src/backend/oracle_parser/ora_scan.l
+654-											   false);
+655-							yylval->str = litbufdup(yyscanner);
+656-							if (strcmp(yylval->str, "") == 0 &&
+657-								ORA_PARSER == compatible_db &&
+658:								enable_emptystring_to_NULL)
+659-							{
+660-								return NULL_P;
+661-							}
+662-							return SCONST;
+663-						case xus:
+664-							yylval->str = litbufdup(yyscanner);
+```
+
+2. **Literal conversion (ora_scan.l):** When the parser is ORA_PARSER and the switch is enabled, an empty literal returns NULL_P at lines 656–661 rather than the string constant SCONST.
+
+```bash
+[root@node1 ~]# grep -n -B 3 -A 8 'enable_emptystring_to_NULL' /tmp/IvorySQL-IvorySQL_5.4/src/backend/tcop/postgres.c
+1992-				 * call.
+1993-				 */
+1994-				if (compatible_db == ORA_PARSER &&
+1995:					enable_emptystring_to_NULL &&
+1996-					plength == 0)
+1997-				{
+1998-					pbuf.data = NULL;		/* keep compiler quiet */
+1999-					csave = 0;
+2000-					isNull = true;
+2001-					plength = -1;
+2002-				}
+2003-				else
+
+```
+
+3. **Bound-parameter conversion (postgres.c):** A parameter of length zero sets isNull to true at lines 1994–2002, corresponding to the NULL result from `EXECUTE p_empty('')` in the psql test.
+
+## Migration Checks
+
+1. **Settings:** ivorysql.compatible_mode switches between PG and Oracle per session. Conversion requires both settings. Keep the switch on for applications that need Oracle empty-string semantics; disable it when that compatibility is unnecessary.
+2. **DDL:** In Oracle mode, inserting `''` into a NOT NULL column is equivalent to inserting NULL. Migration scripts need special handling if the source application stores real empty strings. `DEFAULT ''` becomes NULL; confirm this is intended. Create varchar2 columns in Oracle-compatible sessions.
+3. **Existing data:** Changing modes does not rewrite stored values. Use `WHERE v = ''` in PG mode or with conversion disabled, or use `WHERE length(v) = 0` in either mode. In Oracle mode with conversion enabled, the equality predicate matches no rows.
+4. **Application SQL:** In Oracle, `WHERE col = ''` is effectively `col = NULL`, whose result is unknown. IvorySQL Oracle mode behaves the same; use col IS NULL to find NULLs. Empty literals or JDBC/PLSQL parameters follow NULL behavior in length() and COALESCE. Concatenation differs: `NULL || 'x'` returns x under Oracle semantics and NULL in native PostgreSQL. Recheck application SQL accordingly.
+5. **Ports:** Listening on both 5432 and 1521 is normal IvorySQL behavior. Port 1521 is the Oracle-compatible endpoint; configure firewall access as needed.
+
+<a id="build-errors"></a>
+
+## Appendix: Typical Build Errors
+
+Two errors commonly interrupt a source build of IvorySQL 5.4 on a minimal Rocky Linux 9.5 installation. Fix them and resume make; run make distclean first if configure options changed.
+
+**1. configure fails because no C compiler is available.** Install the basic build dependencies and retry:
+
+```bash
+configure: error: no acceptable C compiler found in $PATH
+# dnf install -y gcc make readline-devel zlib-devel flex bison perl-devel perl-ExtUtils-Embed
+```
+
+**2. uuid-ossp requires an explicit UUID library.** The error asks for --with-uuid without specifying which library. Install libuuid-devel and rerun configure:
+
+```bash
+uuid-ossp.c:40:2: 错误：#error "please use configure's --with-uuid switch to select a UUID library"
+# dnf install -y libuuid-devel
+# make distclean
+# ./configure --prefix=/opt/ivorysql/5.4 --without-llvm --without-icu --with-uuid=e2fs
+```

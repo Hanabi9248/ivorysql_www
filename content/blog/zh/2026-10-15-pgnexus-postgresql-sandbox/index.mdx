@@ -1,0 +1,129 @@
+---
+slug: "pgnexus-postgresql-sandbox"
+title: "不装库玩转 PG 18？这个沙盒连内核补丁都能测 —— PGNexus 实操实录"
+date: "2026-10-15"
+author: "ShunWah"
+category: "PostgreSQL"
+image: "/images/blog/covers/pgnexus-postgresql-sandbox-zh.png"
+tags: ["PGNexus", "PostgreSQL", "Sandbox", "AI"]
+description: "从邮箱注册到 PostgreSQL 18 与 IvorySQL 5.6 沙盒，实操内核补丁测试、物理复制、基准测试与 AI 辅助排查。"
+---
+
+> 作者：马顺华（shunwah · 数据库界华少）\
+> 原发：公众号「shunwah星辰数智社」 ｜ 2026-09-30
+
+---
+
+## Hook
+
+各位猜怎么着，我这次"装" PostgreSQL，全程没碰过安装包。
+
+9 月 12 日，在 IvorySQL 的那场分享上，我把 PGNexus 这个平台从注册账号一路点到了基准测试。从注册到 PG 18 就绪，中间隔着几次点击和一封验证邮件——**没有一次编译，没有一行安装命令**。
+
+> 「装一个数据库的最短路径，不是下载安装包，是注册一个邮箱。」
+
+**一句话定位**：PGNexus，PostgreSQL 全栈式产学研协同创新平台——学习、开发、评审、实验、协作，一个平台全覆盖。社区信息汇总、知识库、贡献者档案、机构与招聘都在上面，但今天我只讲最让我上头的板块：**沙盒实验室**——官方给的说法是"浏览器里的 PostgreSQL 实验室，从 SQL 体验到底层补丁开发"。
+
+你现在就可以打开 pgnexus.ai 注册一个，跟着这篇往下点——全文截图都是我实操时的原始界面，一个都没修。
+
+![图 01 · PGNexus 首页](/images/blog/pgnexus-postgresql-sandbox/20260910-2098058050003869696_461941.png)
+
+## //01 基础沙盒：注册个邮箱，PG 18 就到货了
+
+**沙盒像试驾：到点自动收回去，你连还车手续都不用办。**
+
+注册只要一个邮箱，验证链接 24 小时内有效，点完登录直接进实验室。
+
+![图 02 · 注册](/images/blog/pgnexus-postgresql-sandbox/20260910-2098058524031016960_461941.png)
+
+![图 03 · 登录成功](/images/blog/pgnexus-postgresql-sandbox/20260910-2098059554949505024_461941.png)
+
+第一站是沙盒环境——官方定位写得很直白：用于测试和实验的隔离数据库环境。
+
+![图 04 · 沙盒环境](/images/blog/pgnexus-postgresql-sandbox/20260910-2098059861645402112_461941.png)
+
+启动沙盒的界面上，版本随便挑：PostgreSQL 18 / 17 / 16 / 15 / 14。我一个 DBA 的本能——新版本先摸再说，点了 18。
+
+![图 05 · 启动沙盒](/images/blog/pgnexus-postgresql-sandbox/20260910-2098061231399723008_461941.png)
+
+几秒后状态就位：我的沙盒 ID 开头是 `u4sg4spc`，PG 18"就绪"，干净实例倒计时 **26:37**，不够用还能一键延长 30 分钟。这个倒计时设计我很喜欢：它不装，明明白白告诉你这是个临时环境。
+
+![图 06 · 我的沙盒就绪](/images/blog/pgnexus-postgresql-sandbox/20260910-2098062240268247040_461941.png)
+
+连接打开就是标准 psql 终端，语法自动补全。不知道拿它测什么？界面里还有"AI 生成测试案例"，让它出题。
+
+![图 08 · AI 生成测试案例](/images/blog/pgnexus-postgresql-sandbox/20260910-2098064672654188544_461941.png)
+
+更好玩的是分支版本——不止 PostgreSQL，还有 **IvorySQL**，版本档位已经走到 5 (5.6)。我点了 IvorySQL 5.6，连上就敲了句 select version：返回的是 PostgreSQL 18.6 (IvorySQL 5.6)——内核还是那条 PostgreSQL 主线，兼容能力做在分支上。同一个浏览器标签页，前一分钟还是 PG 18，后一分钟就是 IvorySQL——对要写兼容性验证的人来说，这个体验太省事了。
+
+![图 09 · 启动沙盒：版本档位已到 IvorySQL 5 (5.6)](/images/blog/pgnexus-postgresql-sandbox/figure-09.png)
+
+![图 10 · 连接 IvorySQL 5.6：select version 返回 PostgreSQL 18.6 (IvorySQL 5.6)](/images/blog/pgnexus-postgresql-sandbox/figure-10.png)
+
+用完点销毁，弹窗还贴心地问一句"确定要销毁吗"——像还共享充电宝，咔哒一声，环境回收，互不影响。
+
+![图 11 · 确定要销毁吗](/images/blog/pgnexus-postgresql-sandbox/figure-11.jpg)
+
+## //02 开发者沙盒：AI 帮我把内核补丁测了
+
+**给 PG 提内核补丁这件事，门槛正在从"会编译"降到"会点按钮"。**
+
+沙盒其实分两种口味：**基础**直接渲染终端的原始 Shell，**体验**是带工作台的图形化界面。基础沙盒连上就是 psql，我顺手敲了句 SELECT 1 FROM dual——Oracle 党会心一笑。
+
+![图 12 · 沙盒类型：基础（原始 Shell）/ 体验（图形工作台）](/images/blog/pgnexus-postgresql-sandbox/figure-12.jpg)
+
+![图 13 · 基础沙盒：psql 直连，SELECT 1 FROM dual 照样返回](/images/blog/pgnexus-postgresql-sandbox/figure-13.jpg)
+
+先看体验沙盒的全景：界面即文档——工作区、psql、日志、拓扑、AI 助手一屏排开（图 14、15）。查日志能快速上手，AI 工具也在工具栏里候着。
+
+![图 14、15 · 体验沙盒全景：界面即文档](/images/blog/pgnexus-postgresql-sandbox/figure-14.jpg)
+
+![图 16 · 查日志，快速上手](/images/blog/pgnexus-postgresql-sandbox/20260910-2098072356119994368_461941.png)
+
+![图 17 · 工具栏里的 AI 工具](/images/blog/pgnexus-postgresql-sandbox/20260910-2098073294331781120_461941.png)
+
+真正的重头戏是**开发者沙盒**——PG 内核开发专属。补丁管理支持添加、移除、重新排序，社区补丁一键应用、实时重建。
+
+![图 18 · 启动开发者沙盒](/images/blog/pgnexus-postgresql-sandbox/20260912-2098574445845766144_461941.png)
+
+![图 19 · 添加应用补丁：一键应用 + 实时重建](/images/blog/pgnexus-postgresql-sandbox/20260912-2098578362079993856_461941.png)
+
+我点下"运行测试"，AI 接管了整个测试流程：自动执行验证用例、收集结果，最后给出测试报告总结，还带着关联的邮件列表讨论链接。
+
+![图 20 · AI 测试补丁](/images/blog/pgnexus-postgresql-sandbox/20260912-2098581013698519040_461941.png)
+
+打个比方：以前给 PG 提补丁像自己在家烤面包——和面、发酵、进烤箱，失败一炉再来一炉；现在像把面团交给后厨，你盯着火候，最后尝一口签字。**看懂 diff 的功力还是你的，但"环境搭不起来"不再是拦路虎。**
+
+## //03 物理复制 + 基准测试：备库是点出来的
+
+**备库部署从"手敲 primary_conninfo"，变成了两次点击。**
+
+拓扑面板四种模式一键切换：单机 / 物理复制 / 逻辑复制 / FDW 分片。我选了物理复制，部署备库，一键拉起主备，右上角 Tab 在主库、备库之间跳转，各自连接查看。
+
+![图 21 · 复制部署：一键部署备库](/images/blog/pgnexus-postgresql-sandbox/20260912-2098579154639872000_461941.png)
+
+![图 22 · 物理复制部署完成，主备就位](/images/blog/pgnexus-postgresql-sandbox/20260912-2098581834556858368_461941.png)
+
+拓扑就位后跑基准测试，跑完报告直接生成。
+
+![图 23 · 基准测试完成](/images/blog/pgnexus-postgresql-sandbox/20260912-2098582685359349760_461941.png)
+
+中途遇到报错，AI 助手的反应值得一提：它不是甩你一行 error code 了事，而是给出排查方案。这跟我在 LockDetective 里死磕锁等待是同一类思路——**工具把线索递过来，判断得人来做。它交活，我签字。**
+
+![图 24 · AI 助手：报错给出排查方案](/images/blog/pgnexus-postgresql-sandbox/20260912-2098583760585957376_461941.png)
+
+## //04 动手前，三条使用须知
+
+1. **实例是限时的。** 倒计时 26:37、可延长 30 分钟、到期自动销毁——长实验先规划好节奏，重要的东西别只存在沙盒里。
+2. **沙盒是实验环境，不是生产替身。** 验证功能、跑测试很合适；容量、参数跟你的生产环境是两回事，结论别直接平移。
+3. **AI 的结论要人工复核。** 测试报告和报错方案给的是方向，点头的得是你。
+
+这三条不是缺点，是前提。
+
+## Takeaway
+
+- **上手一个新库的最短路径，是先让它跑起来，再回头读文档。**
+- **内核补丁的门槛在降：环境交给平台，判断留给开发者。**
+- **AI 负责交活，你负责签字——报告再漂亮，复核完才算数。**
+
+平台地址：[pgnexus.ai](https://pgnexus.ai)，邮箱注册即用。
