@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Image from "next/image";
 
 import { useLocale, useTranslations } from "next-intl";
 
 import { Link } from "@/i18n/navigation";
+import { getEventStatus } from "@/lib/event-status";
 import { cn, parseUTCDate } from "@/lib/utils";
 
 type IvoryEvent = {
@@ -15,6 +16,8 @@ type IvoryEvent = {
   description: string;
   date: string;
   endDate?: string;
+  startsAt?: string;
+  endsAt?: string;
   location: string;
   eventType: string;
   type: "Online" | "Offline";
@@ -30,6 +33,12 @@ export function EventsClient({ allEvents }: EventsClientProps) {
   const locale = useLocale();
   const t = useTranslations("EventsUI");
   const dateLocale = locale === "zh" ? "zh-CN" : "en-US";
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -195,6 +204,7 @@ export function EventsClient({ allEvents }: EventsClientProps) {
                     <EventCard
                       key={event.slug}
                       event={event}
+                      now={now}
                       dateLocale={dateLocale}
                       statusLabels={{
                         ended: t("statusEnded"),
@@ -215,29 +225,31 @@ export function EventsClient({ allEvents }: EventsClientProps) {
 
 function EventCard({
   event,
+  now,
   dateLocale,
   statusLabels,
 }: {
   event: IvoryEvent;
+  now: Date | null;
   dateLocale: string;
   statusLabels: { ended: string; upcoming: string; ongoing: string };
 }) {
-  const now = new Date();
   const startDate = parseUTCDate(event.date);
   const endDate = event.endDate ? parseUTCDate(event.endDate) : startDate;
 
+  const state = now ? getEventStatus(event, now) : null;
   let status: { label: string; color: string; bg: string } = {
     label: statusLabels.ended,
     color: "text-muted-foreground",
     bg: "bg-muted/50",
   };
-  if (now < startDate) {
+  if (state === "upcoming") {
     status = {
       label: statusLabels.upcoming,
       color: "text-primary",
       bg: "bg-primary/10",
     };
-  } else if (now <= endDate) {
+  } else if (state === "ongoing") {
     status = {
       label: statusLabels.ongoing,
       color: "text-amber-600 dark:text-amber-400",
@@ -268,7 +280,7 @@ function EventCard({
       className="group bg-muted/20 hover:bg-muted/40 flex gap-4 rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-md"
     >
       {/* Thumbnail */}
-      <div className="bg-muted/60 relative hidden w-28 shrink-0 overflow-hidden rounded-lg sm:block md:w-36">
+      <div className="bg-muted/60 relative hidden w-28 shrink-0 self-start overflow-hidden rounded-lg sm:block md:w-36">
         <div className="aspect-[16/10]">
           {event.image ? (
             <Image
@@ -276,7 +288,7 @@ function EventCard({
               alt={event.title}
               fill
               sizes="144px"
-              className="object-cover object-top transition-transform duration-500 group-hover:scale-[1.03]"
+              className="object-cover object-left-top transition-transform duration-500 group-hover:scale-[1.03]"
             />
           ) : (
             <div className="text-muted-foreground flex size-full items-center justify-center">
@@ -304,15 +316,17 @@ function EventCard({
             <h4 className="text-foreground line-clamp-1 text-base font-semibold group-hover:underline">
               {event.title}
             </h4>
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-                status.bg,
-                status.color,
-              )}
-            >
-              {status.label}
-            </span>
+            {now ? (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+                  status.bg,
+                  status.color,
+                )}
+              >
+                {status.label}
+              </span>
+            ) : null}
           </div>
 
           <p className="text-muted-foreground mt-1 line-clamp-1 text-sm">

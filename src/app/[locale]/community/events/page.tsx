@@ -4,9 +4,13 @@ import { getTranslations } from "next-intl/server";
 import { EventsClient } from "./EventsClient";
 
 import { Link } from "@/i18n/navigation";
+import { getEventStart, getEventStatus } from "@/lib/event-status";
 import { getSortedEvents } from "@/lib/events";
 import { buildAlternates } from "@/lib/hreflang";
 import { parseUTCDate } from "@/lib/utils";
+
+// Refresh the featured event as scheduled start/end times pass.
+export const revalidate = 60;
 
 export async function generateMetadata({
   params,
@@ -44,16 +48,13 @@ export default async function EventsPage({
   // 2. If none, look for ongoing events (startDate <= now <= endDate)
   // Sort upcoming by date ascending to find the closest one
   const notStartedEvents = allEvents
-    .filter((e) => parseUTCDate(e.date) > now)
+    .filter((e) => getEventStatus(e, now) === "upcoming")
     .sort(
-      (a, b) => parseUTCDate(a.date).getTime() - parseUTCDate(b.date).getTime(),
+      (a, b) => getEventStart(a).getTime() - getEventStart(b).getTime(),
     );
 
   const ongoingEvents = allEvents.filter(
-    (e) =>
-      parseUTCDate(e.date) <= now &&
-      e.endDate &&
-      parseUTCDate(e.endDate) >= now,
+    (event) => getEventStatus(event, now) === "ongoing",
   );
 
   const featuredEvent =
@@ -109,6 +110,8 @@ function FeaturedEvent({
     description: string;
     date: string;
     endDate?: string;
+    startsAt?: string;
+    endsAt?: string;
     location: string;
     eventType: string;
     type: "Online" | "Offline";
@@ -122,8 +125,7 @@ function FeaturedEvent({
 }) {
   const now = new Date();
   const startDate = parseUTCDate(event.date);
-  const isOngoing =
-    startDate <= now && event.endDate && parseUTCDate(event.endDate) >= now;
+  const isOngoing = getEventStatus(event, now) === "ongoing";
   const statusLabel = isOngoing ? currentlyHappening : nextUpcomingEvent;
 
   const dateLocale = locale === "zh" ? "zh-CN" : "en-US";
