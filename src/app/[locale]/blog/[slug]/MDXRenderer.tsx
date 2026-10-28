@@ -47,13 +47,18 @@ export function MDXRenderer({ content }: { content: string }) {
             <table className="min-w-full text-sm">{children}</table>
           </div>
         ),
-        th: ({ children }) => (
-          <th className="border-border bg-muted/30 border-b px-4 py-2 text-left font-semibold">
+        th: ({ children, style }) => (
+          <th
+            style={style}
+            className="border-border bg-muted/30 border-b px-4 py-2 text-left font-semibold"
+          >
             {children}
           </th>
         ),
-        td: ({ children }) => (
-          <td className="border-border border-b px-4 py-2">{children}</td>
+        td: ({ children, style }) => (
+          <td style={style} className="border-border border-b px-4 py-2">
+            {children}
+          </td>
         ),
       }}
     >
