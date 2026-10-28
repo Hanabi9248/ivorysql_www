@@ -46,7 +46,7 @@ export function BlogClient({ initialPosts, allPosts }: BlogClientProps) {
     }
 
     if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
+      const term = searchTerm.trim().toLowerCase();
       posts = posts.filter(
         (p) =>
           p.title.toLowerCase().includes(term) ||
