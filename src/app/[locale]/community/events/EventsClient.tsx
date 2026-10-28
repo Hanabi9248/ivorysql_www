@@ -63,7 +63,7 @@ export function EventsClient({ allEvents }: EventsClientProps) {
     }
 
     if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
+      const term = searchTerm.trim().toLowerCase();
       events = events.filter(
         (e) =>
           e.title.toLowerCase().includes(term) ||
