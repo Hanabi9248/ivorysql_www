@@ -1,6 +1,54 @@
 {
-  "fetchedAt": "2026-09-07T06:56:25.529Z",
+  "fetchedAt": "2026-10-28T19:46:19.973Z",
   "releases": [
+    {
+      "tag_name": "IvorySQL_5.6",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-09-18T01:54:22Z",
+      "assets": [
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.aarch64.rpm",
+          "size": 234925388,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.aarch64.rpm"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.aarch64.rpm.md5",
+          "size": 76,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.aarch64.rpm.md5"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.amd64.deb",
+          "size": 198488924,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.amd64.deb"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.amd64.deb.md5",
+          "size": 74,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.amd64.deb.md5"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.arm64.deb",
+          "size": 236032700,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.arm64.deb"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.arm64.deb.md5",
+          "size": 74,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.arm64.deb.md5"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.x86_64.rpm",
+          "size": 198754838,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.x86_64.rpm"
+        },
+        {
+          "name": "IvorySQL-5.6-74c405c-20261016.x86_64.rpm.md5",
+          "size": 75,
+          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_5.6/IvorySQL-5.6-74c405c-20261016.x86_64.rpm.md5"
+        }
+      ]
+    },
     {
       "tag_name": "IvorySQL_1.23",
       "draft": false,
@@ -742,77 +790,13 @@
           "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_1.17/IvorySQL-1.17-7e51933-20250822.arm64.deb.md5"
         }
       ]
-    },
-    {
-      "tag_name": "IvorySQL_4.4",
-      "draft": false,
-      "prerelease": false,
-      "published_at": "2025-03-10T12:25:24Z",
-      "assets": [
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.aarch64.rpm",
-          "size": 73177402,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.aarch64.rpm"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.aarch64.rpm.md5",
-          "size": 76,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.aarch64.rpm.md5"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.aarch64.tar.gz",
-          "size": 73327168,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.aarch64.tar.gz"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.aarch64.tar.gz.md5",
-          "size": 79,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.aarch64.tar.gz.md5"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.amd64.deb",
-          "size": 98844298,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.amd64.deb"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.amd64.deb.md5",
-          "size": 74,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.amd64.deb.md5"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.arm64.deb",
-          "size": 73464090,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.arm64.deb"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.arm64.deb.md5",
-          "size": 74,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.arm64.deb.md5"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.x86_64.rpm",
-          "size": 98519007,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.x86_64.rpm"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.x86_64.rpm.md5",
-          "size": 75,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.x86_64.rpm.md5"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.x86_64.tar.gz",
-          "size": 98777529,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.x86_64.tar.gz"
-        },
-        {
-          "name": "IvorySQL-4.4-a50789d-20250304.x86_64.tar.gz.md5",
-          "size": 78,
-          "browser_download_url": "https://github.com/IvorySQL/IvorySQL/releases/download/IvorySQL_4.4/IvorySQL-4.4-a50789d-20250304.x86_64.tar.gz.md5"
-        }
-      ]
     }
   ],
   "md5s": {
+    "IvorySQL-5.6-74c405c-20261016.aarch64.rpm": "56bf5e2bc8425958ce4ffaf90abc33b0",
+    "IvorySQL-5.6-74c405c-20261016.amd64.deb": "32dece3a863c03fe623df8703143a94a",
+    "IvorySQL-5.6-74c405c-20261016.arm64.deb": "2cc1710c589bfa8dd850cafcd459653e",
+    "IvorySQL-5.6-74c405c-20261016.x86_64.rpm": "be0c4e6189d5f7c340863ceb321d91dc",
     "IvorySQL-1.23-3402884-20260709.aarch64.rpm": "59ea16fce17cd78ce6805cea7741d948",
     "IvorySQL-1.23-3402884-20260709.amd64.deb": "99420413018ee31908e95f84eb153b45",
     "IvorySQL-1.23-3402884-20260709.arm64.deb": "a5b669d532a359524693367b3bb204bb",
@@ -879,12 +863,6 @@
     "IvorySQL-1.17-7e51933-20250820.amd64.deb": "fd06de46fabed567bd4fead1c41e7770",
     "IvorySQL-1.17-7e51933-20250820.x86_64.rpm": "dd4abdca3502ce23a14f4e3cf268bb69",
     "IvorySQL-1.17-7e51933-20250822.aarch64.rpm": "f3148544d618be57b4b55b20de285241",
-    "IvorySQL-1.17-7e51933-20250822.arm64.deb": "a148d4bf54872bee988fcc25e50725bc",
-    "IvorySQL-4.4-a50789d-20250304.aarch64.rpm": "cf90feda25893533d3f58126bb3ba13a",
-    "IvorySQL-4.4-a50789d-20250304.aarch64.tar.gz": "f4046103fb65d4bb443e44939bbc2f16",
-    "IvorySQL-4.4-a50789d-20250304.amd64.deb": "52295e8ba1334cb9c6942adc931a0a89",
-    "IvorySQL-4.4-a50789d-20250304.arm64.deb": "57779b6d9f241ca1d51812d189064dae",
-    "IvorySQL-4.4-a50789d-20250304.x86_64.rpm": "50e44ed426075b84b1d276682fa9ec6e",
-    "IvorySQL-4.4-a50789d-20250304.x86_64.tar.gz": "b898b1d5f208251db53a89d0aec5980d"
+    "IvorySQL-1.17-7e51933-20250822.arm64.deb": "a148d4bf54872bee988fcc25e50725bc"
   }
 }
