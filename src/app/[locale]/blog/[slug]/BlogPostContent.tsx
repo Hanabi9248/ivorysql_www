@@ -1,11 +1,11 @@
 import Image from "next/image";
 
 import { ChevronLeft, Linkedin, Twitter } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { MDXRenderer } from "./MDXRenderer";
 
-import { Link } from "@/i18n/navigation";
+import { getPathname, Link } from "@/i18n/navigation";
 import authorsData from "@/lib/authors.json";
 import type { BlogPostWithContent } from "@/lib/posts";
 
@@ -39,7 +39,8 @@ export function BlogPostContent({
   const t = useTranslations("BlogPostUI");
   const tc = useTranslations("Common");
   const authorInfo = resolveAuthor(post.author);
-  const shareUrl = `https://www.ivorysql.org${post.path}`;
+  const locale = useLocale();
+  const shareUrl = `https://www.ivorysql.org${getPathname({ locale, href: post.path })}`;
   const encodedTitle = encodeURIComponent(post.title);
 
   return (
