@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Image from "next/image";
 
@@ -198,6 +198,16 @@ export function PartnersClient({
   const [activeCategory, setActiveCategory] = useState<string>(
     categories[0].id,
   );
+
+  const previousCategory = useRef(activeCategory);
+
+  useEffect(() => {
+    if (previousCategory.current === activeCategory) return;
+    previousCategory.current = activeCategory;
+    document
+      .getElementById(activeCategory)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [activeCategory]);
 
   const filteredCategories = useMemo(() => {
     return categories.filter((c) => c.id === activeCategory);
