@@ -248,7 +248,7 @@ export function DatabaseDownload({ releases }: { releases: DbRelease[] }) {
                     <code className="text-muted-foreground truncate font-mono text-xs">
                       {selected.md5}
                     </code>
-                    <CopyButton value={selected.md5} />
+                    <CopyButton key={selected.md5} value={selected.md5} />
                   </div>
                 ) : null}
               </>
